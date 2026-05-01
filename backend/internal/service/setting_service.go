@@ -1847,11 +1847,12 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 	// 初始化默认设置
 	defaults := map[string]string{
 		SettingKeyRegistrationEnabled:                      "true",
-		SettingKeyEmailVerifyEnabled:                       "false",
+		SettingKeyEmailVerifyEnabled:                       "true",
 		SettingKeyRegistrationEmailSuffixWhitelist:         "[]",
 		SettingKeyPromoCodeEnabled:                         "true", // 默认启用优惠码功能
 		SettingKeySiteName:                                 "Sub2API",
 		SettingKeySiteLogo:                                 "",
+		SettingKeyAPIBaseURL:                               "https://liuloys.top/v1",
 		SettingKeyPurchaseSubscriptionEnabled:              "false",
 		SettingKeyPurchaseSubscriptionURL:                  "",
 		SettingKeyTableDefaultPageSize:                     "20",
@@ -1925,8 +1926,12 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyAuthSourceDefaultWeChatGrantOnSignup:     "false",
 		SettingKeyAuthSourceDefaultWeChatGrantOnFirstBind:  "false",
 		SettingKeyForceEmailOnThirdPartySignup:             "false",
+		SettingKeySMTPHost:                                 "smtp.qq.com",
 		SettingKeySMTPPort:                                 "587",
-		SettingKeySMTPUseTLS:                               "false",
+		SettingKeySMTPUsername:                             "liuloys@qq.com",
+		SettingKeySMTPFrom:                                 "liuloys@qq.com",
+		SettingKeySMTPFromName:                             "XiaoHuiAPI",
+		SettingKeySMTPUseTLS:                               "true",
 		// Model fallback defaults
 		SettingKeyEnableModelFallback:      "false",
 		SettingKeyFallbackModelAnthropic:   "claude-3-5-sonnet-20241022",
