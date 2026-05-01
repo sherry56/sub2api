@@ -214,7 +214,6 @@ type SystemSettings struct {
 
 	// OpenAI fast/flex policy
 	OpenAIFastPolicySettings *OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
-
 }
 
 type DefaultSubscriptionSetting struct {

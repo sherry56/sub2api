@@ -157,13 +157,13 @@ type SystemSettings struct {
 	WebSearchEmulationEnabled bool // 是否启用 web search 模拟
 
 	// Research Drawing Pipeline (PaperBanana 参数迁移，仅配置项)
-	ResearchDrawingExpMode             string
-	ResearchDrawingRetrievalSetting    string
-	ResearchDrawingNumCandidates       int
-	ResearchDrawingAspectRatio         string
-	ResearchDrawingMaxCriticRounds     int
-	ResearchDrawingMainModelName       string
-	ResearchDrawingImageGenModelName   string
+	ResearchDrawingExpMode                          string
+	ResearchDrawingRetrievalSetting                 string
+	ResearchDrawingNumCandidates                    int
+	ResearchDrawingAspectRatio                      string
+	ResearchDrawingMaxCriticRounds                  int
+	ResearchDrawingMainModelName                    string
+	ResearchDrawingImageGenModelName                string
 	ResearchDrawingMaxRefineResolution              string
 	ResearchDrawingUnitPrice                        float64
 	ResearchDrawingMethodOptimizationEnabled        bool

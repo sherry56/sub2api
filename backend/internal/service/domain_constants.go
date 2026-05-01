@@ -348,13 +348,13 @@ const (
 	SettingKeyWebSearchEmulationConfig = "web_search_emulation_config" // JSON 配置
 
 	// Research Drawing Pipeline (PaperBanana 参数迁移，仅配置项，不含用户数据)
-	SettingKeyResearchDrawingExpMode             = "research_drawing_exp_mode"
-	SettingKeyResearchDrawingRetrievalSetting    = "research_drawing_retrieval_setting"
-	SettingKeyResearchDrawingNumCandidates       = "research_drawing_num_candidates"
-	SettingKeyResearchDrawingAspectRatio         = "research_drawing_aspect_ratio"
-	SettingKeyResearchDrawingMaxCriticRounds     = "research_drawing_max_critic_rounds"
-	SettingKeyResearchDrawingMainModelName       = "research_drawing_main_model_name"
-	SettingKeyResearchDrawingImageGenModelName   = "research_drawing_image_gen_model_name"
+	SettingKeyResearchDrawingExpMode                          = "research_drawing_exp_mode"
+	SettingKeyResearchDrawingRetrievalSetting                 = "research_drawing_retrieval_setting"
+	SettingKeyResearchDrawingNumCandidates                    = "research_drawing_num_candidates"
+	SettingKeyResearchDrawingAspectRatio                      = "research_drawing_aspect_ratio"
+	SettingKeyResearchDrawingMaxCriticRounds                  = "research_drawing_max_critic_rounds"
+	SettingKeyResearchDrawingMainModelName                    = "research_drawing_main_model_name"
+	SettingKeyResearchDrawingImageGenModelName                = "research_drawing_image_gen_model_name"
 	SettingKeyResearchDrawingMaxRefineResolution              = "research_drawing_max_refine_resolution"
 	SettingKeyResearchDrawingUnitPrice                        = "research_drawing_unit_price"
 	SettingKeyResearchDrawingMethodOptimizationEnabled        = "research_drawing_method_optimization_enabled"
