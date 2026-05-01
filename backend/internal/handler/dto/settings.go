@@ -150,13 +150,13 @@ type SystemSettings struct {
 	WebSearchEmulationEnabled bool `json:"web_search_emulation_enabled"`
 
 	// Research Drawing Pipeline (PaperBanana 参数迁移，仅配置项)
-	ResearchDrawingExpMode             string `json:"research_drawing_exp_mode"`
-	ResearchDrawingRetrievalSetting    string `json:"research_drawing_retrieval_setting"`
-	ResearchDrawingNumCandidates       int    `json:"research_drawing_num_candidates"`
-	ResearchDrawingAspectRatio         string `json:"research_drawing_aspect_ratio"`
-	ResearchDrawingMaxCriticRounds     int    `json:"research_drawing_max_critic_rounds"`
-	ResearchDrawingMainModelName       string `json:"research_drawing_main_model_name"`
-	ResearchDrawingImageGenModelName   string `json:"research_drawing_image_gen_model_name"`
+	ResearchDrawingExpMode                          string  `json:"research_drawing_exp_mode"`
+	ResearchDrawingRetrievalSetting                 string  `json:"research_drawing_retrieval_setting"`
+	ResearchDrawingNumCandidates                    int     `json:"research_drawing_num_candidates"`
+	ResearchDrawingAspectRatio                      string  `json:"research_drawing_aspect_ratio"`
+	ResearchDrawingMaxCriticRounds                  int     `json:"research_drawing_max_critic_rounds"`
+	ResearchDrawingMainModelName                    string  `json:"research_drawing_main_model_name"`
+	ResearchDrawingImageGenModelName                string  `json:"research_drawing_image_gen_model_name"`
 	ResearchDrawingMaxRefineResolution              string  `json:"research_drawing_max_refine_resolution"`
 	ResearchDrawingUnitPrice                        float64 `json:"research_drawing_unit_price"`
 	ResearchDrawingMethodOptimizationEnabled        bool    `json:"research_drawing_method_optimization_enabled"`
