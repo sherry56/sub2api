@@ -1,0 +1,124 @@
+# =============================================================================
+# Sub2API Docker Compose - Optional PaperBanana + Unified Menu Overlay
+# =============================================================================
+# Usage:
+#   docker compose -f docker-compose.local.yml -f docker-compose.paperbanana.yml up -d
+#
+# This overlay keeps the default Sub2API deployment unchanged while adding:
+#   - PaperBanana MySQL
+#   - Research Drawing service (PaperBanana runtime)
+#   - Unified static menu page
+#
+# Requirements:
+#   1. A PaperBanana source checkout must exist locally.
+#   2. The default build context assumes a sibling checkout next to the
+#      current workspace root:
+#        ../../../PaperBanana-fix-issue-38-refine
+#   3. Override PAPERBANANA_BUILD_CONTEXT in .env if your path differs.
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # PaperBanana MySQL Database
+  # ===========================================================================
+  paperbanana-mysql:
+    image: mysql:8.0
+    container_name: paperbanana-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - paperbanana_mysql_data:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${PAPERBANANA_MYSQL_ROOT_PASSWORD:-change_this_pb_mysql_root_password}
+      - MYSQL_DATABASE=${PAPERBANANA_DB_NAME:-paperbanana}
+      - MYSQL_USER=${PAPERBANANA_DB_USER:-paperbanana}
+      - MYSQL_PASSWORD=${PAPERBANANA_DB_PASSWORD:-paperbanana_password}
+      - TZ=${TZ:-Asia/Shanghai}
+    networks:
+      - sub2api-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ===========================================================================
+  # Research Drawing Service (PaperBanana runtime)
+  # ===========================================================================
+  paperbanana:
+    build:
+      context: ${PAPERBANANA_BUILD_CONTEXT:-../../../PaperBanana-fix-issue-38-refine}
+    image: ${PAPERBANANA_IMAGE:-paperbanana-demo:latest}
+    container_name: paperbanana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PAPERBANANA_PORT:-8081}:8080"
+    volumes:
+      - ./paperbanana/user_data:/app/user_data
+      - ./paperbanana/configs:/app/configs
+    environment:
+      - PB_DB_HOST=${PAPERBANANA_DB_HOST:-paperbanana-mysql}
+      - PB_DB_PORT=${PAPERBANANA_DB_PORT:-3306}
+      - PB_DB_USER=${PAPERBANANA_DB_USER:-paperbanana}
+      - PB_DB_PASSWORD=${PAPERBANANA_DB_PASSWORD:-paperbanana_password}
+      - PB_DB_NAME=${PAPERBANANA_DB_NAME:-paperbanana}
+      - PB_ADMIN_USERNAME=${PAPERBANANA_ADMIN_USERNAME:-B308}
+      - PB_ADMIN_PASSWORD=${PAPERBANANA_ADMIN_PASSWORD:-change_this_pb_admin_password}
+      - PB_HOST=0.0.0.0
+      - PB_PORT=8080
+      - PB_SUB2API_BASE_URL=${PAPERBANANA_SUB2API_BASE_URL:-http://sub2api:8080}
+      - PB_REQUIRE_SUB2API_SERVICE_TOKEN=${PB_REQUIRE_SUB2API_SERVICE_TOKEN:-true}
+      - PB_SUB2API_SERVICE_TOKEN=${PB_SUB2API_SERVICE_TOKEN:-test_research_drawing_token_123456}
+      - TZ=${TZ:-Asia/Shanghai}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    depends_on:
+      sub2api:
+        condition: service_healthy
+      paperbanana-mysql:
+        condition: service_healthy
+    networks:
+      sub2api-network:
+        aliases:
+          - research-drawing-service
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/login', timeout=5)\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ===========================================================================
+  # Unified Menu Page
+  # ===========================================================================
+  menu:
+    image: nginx:1.27-alpine
+    container_name: sub2api-menu
+    restart: unless-stopped
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${MENU_PORT:-8090}:80"
+    volumes:
+      - ./menu:/usr/share/nginx/html:ro
+    depends_on:
+      sub2api:
+        condition: service_healthy
+      paperbanana:
+        condition: service_healthy
+    networks:
+      - sub2api-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  paperbanana_mysql_data:
+    driver: local

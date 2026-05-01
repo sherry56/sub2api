@@ -1,0 +1,242 @@
+# =============================================================================
+# Sub2API Production Compose - Remote Image Version
+# =============================================================================
+# Server usage:
+#   1. Copy this file and .env to the server deploy directory.
+#   2. Set SUB2API_IMAGE and PAPERBANANA_IMAGE in .env.
+#   3. docker compose -f docker-compose.prod.yml pull
+#   4. docker compose -f docker-compose.prod.yml up -d
+#
+# This file intentionally does not use build:. Images are built by GitHub
+# Actions and pulled by the server.
+# =============================================================================
+
+services:
+  sub2api:
+    image: ${SUB2API_IMAGE:-ghcr.io/your-owner/sub2api:dev}
+    pull_policy: always
+    container_name: sub2api
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-8080}:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - AUTO_SETUP=true
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8080
+      - SERVER_MODE=${SERVER_MODE:-release}
+      - RUN_MODE=${RUN_MODE:-standard}
+      - RESEARCH_DRAWING_API_URL=${RESEARCH_DRAWING_API_URL:-http://research-drawing-service:8080}
+      - RESEARCH_DRAWING_SERVICE_TOKEN=${RESEARCH_DRAWING_SERVICE_TOKEN:?RESEARCH_DRAWING_SERVICE_TOKEN is required}
+      - PAPERBANANA_BASE_URL=${PAPERBANANA_BASE_URL:-http://research-drawing-service:8080}
+      - PAPERBANANA_SERVICE_TOKEN=${RESEARCH_DRAWING_SERVICE_TOKEN:?RESEARCH_DRAWING_SERVICE_TOKEN is required}
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_USER=${POSTGRES_USER:-sub2api}
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - DATABASE_DBNAME=${POSTGRES_DB:-sub2api}
+      - DATABASE_SSLMODE=disable
+      - DATABASE_MAX_OPEN_CONNS=${DATABASE_MAX_OPEN_CONNS:-50}
+      - DATABASE_MAX_IDLE_CONNS=${DATABASE_MAX_IDLE_CONNS:-10}
+      - DATABASE_CONN_MAX_LIFETIME_MINUTES=${DATABASE_CONN_MAX_LIFETIME_MINUTES:-30}
+      - DATABASE_CONN_MAX_IDLE_TIME_MINUTES=${DATABASE_CONN_MAX_IDLE_TIME_MINUTES:-5}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+      - REDIS_POOL_SIZE=${REDIS_POOL_SIZE:-1024}
+      - REDIS_MIN_IDLE_CONNS=${REDIS_MIN_IDLE_CONNS:-10}
+      - REDIS_ENABLE_TLS=${REDIS_ENABLE_TLS:-false}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@sub2api.local}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - JWT_EXPIRE_HOUR=${JWT_EXPIRE_HOUR:-24}
+      - TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY:?TOTP_ENCRYPTION_KEY is required}
+      - TZ=${TZ:-Asia/Shanghai}
+      - GEMINI_OAUTH_CLIENT_ID=${GEMINI_OAUTH_CLIENT_ID:-}
+      - GEMINI_OAUTH_CLIENT_SECRET=${GEMINI_OAUTH_CLIENT_SECRET:-}
+      - GEMINI_OAUTH_SCOPES=${GEMINI_OAUTH_SCOPES:-}
+      - GEMINI_QUOTA_POLICY=${GEMINI_QUOTA_POLICY:-}
+      - GEMINI_CLI_OAUTH_CLIENT_SECRET=${GEMINI_CLI_OAUTH_CLIENT_SECRET:-}
+      - ANTIGRAVITY_OAUTH_CLIENT_SECRET=${ANTIGRAVITY_OAUTH_CLIENT_SECRET:-}
+      - SECURITY_URL_ALLOWLIST_ENABLED=${SECURITY_URL_ALLOWLIST_ENABLED:-false}
+      - SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP=${SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP:-false}
+      - SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS=${SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS:-false}
+      - SECURITY_URL_ALLOWLIST_UPSTREAM_HOSTS=${SECURITY_URL_ALLOWLIST_UPSTREAM_HOSTS:-}
+      - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sub2api-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  postgres:
+    image: postgres:18-alpine
+    container_name: sub2api-postgres
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-sub2api}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - POSTGRES_DB=${POSTGRES_DB:-sub2api}
+      - PGDATA=/var/lib/postgresql/data
+      - TZ=${TZ:-Asia/Shanghai}
+    networks:
+      - sub2api-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:8-alpine
+    container_name: sub2api-redis
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    volumes:
+      - ./redis_data:/data
+    command: >
+      sh -c '
+        redis-server
+        --save 60 1
+        --appendonly yes
+        --appendfsync everysec
+        ${REDIS_PASSWORD:+--requirepass "$REDIS_PASSWORD"}'
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - REDISCLI_AUTH=${REDIS_PASSWORD:-}
+    networks:
+      - sub2api-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  paperbanana-mysql:
+    image: mysql:8.0
+    container_name: paperbanana-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - paperbanana_mysql_data:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${PAPERBANANA_MYSQL_ROOT_PASSWORD:?PAPERBANANA_MYSQL_ROOT_PASSWORD is required}
+      - MYSQL_DATABASE=${PAPERBANANA_DB_NAME:-paperbanana}
+      - MYSQL_USER=${PAPERBANANA_DB_USER:-paperbanana}
+      - MYSQL_PASSWORD=${PAPERBANANA_DB_PASSWORD:?PAPERBANANA_DB_PASSWORD is required}
+      - TZ=${TZ:-Asia/Shanghai}
+    networks:
+      - sub2api-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  paperbanana:
+    image: ${PAPERBANANA_IMAGE:-ghcr.io/your-owner/paperbanana:dev}
+    pull_policy: always
+    container_name: paperbanana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PAPERBANANA_PORT:-8081}:8080"
+    volumes:
+      - ./paperbanana/user_data:/app/user_data
+      - ./paperbanana/configs:/app/configs
+    environment:
+      - PB_DB_HOST=${PAPERBANANA_DB_HOST:-paperbanana-mysql}
+      - PB_DB_PORT=${PAPERBANANA_DB_PORT:-3306}
+      - PB_DB_USER=${PAPERBANANA_DB_USER:-paperbanana}
+      - PB_DB_PASSWORD=${PAPERBANANA_DB_PASSWORD:?PAPERBANANA_DB_PASSWORD is required}
+      - PB_DB_NAME=${PAPERBANANA_DB_NAME:-paperbanana}
+      - PB_ADMIN_USERNAME=${PAPERBANANA_ADMIN_USERNAME:-B308}
+      - PB_ADMIN_PASSWORD=${PAPERBANANA_ADMIN_PASSWORD:?PAPERBANANA_ADMIN_PASSWORD is required}
+      - PB_SESSION_SECRET=${PB_SESSION_SECRET:?PB_SESSION_SECRET is required}
+      - PB_HOST=0.0.0.0
+      - PB_PORT=8080
+      - PB_SUB2API_BASE_URL=${PAPERBANANA_SUB2API_BASE_URL:-http://sub2api:8080}
+      - PB_REQUIRE_SUB2API_SERVICE_TOKEN=${PB_REQUIRE_SUB2API_SERVICE_TOKEN:-true}
+      - PB_SUB2API_SERVICE_TOKEN=${RESEARCH_DRAWING_SERVICE_TOKEN:?RESEARCH_DRAWING_SERVICE_TOKEN is required}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - TZ=${TZ:-Asia/Shanghai}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    depends_on:
+      sub2api:
+        condition: service_healthy
+      paperbanana-mysql:
+        condition: service_healthy
+    networks:
+      sub2api-network:
+        aliases:
+          - research-drawing-service
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/login', timeout=5)\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  menu:
+    image: nginx:1.27-alpine
+    container_name: sub2api-menu
+    restart: unless-stopped
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${MENU_PORT:-8090}:80"
+    volumes:
+      - ./menu:/usr/share/nginx/html:ro
+    depends_on:
+      sub2api:
+        condition: service_healthy
+      paperbanana:
+        condition: service_healthy
+    networks:
+      - sub2api-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  sub2api-network:
+    driver: bridge
+
+volumes:
+  paperbanana_mysql_data:
+    driver: local
