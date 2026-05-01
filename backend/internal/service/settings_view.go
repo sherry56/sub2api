@@ -388,6 +388,44 @@ type BetaPolicySettings struct {
 	Rules []BetaPolicyRule `json:"rules"`
 }
 
+// OpenAI Fast Policy 策略常量
+const (
+	OpenAIFastTierAny      = "all"
+	OpenAIFastTierPriority = "priority"
+	OpenAIFastTierFlex     = "flex"
+)
+
+// OpenAIFastPolicyRule 单条 OpenAI fast/flex 策略规则
+type OpenAIFastPolicyRule struct {
+	ServiceTier          string   `json:"service_tier"`
+	Action               string   `json:"action"`
+	Scope                string   `json:"scope"`
+	ErrorMessage         string   `json:"error_message,omitempty"`
+	ModelWhitelist       []string `json:"model_whitelist,omitempty"`
+	FallbackAction       string   `json:"fallback_action,omitempty"`
+	FallbackErrorMessage string   `json:"fallback_error_message,omitempty"`
+}
+
+// OpenAIFastPolicySettings OpenAI fast 策略配置
+type OpenAIFastPolicySettings struct {
+	Rules []OpenAIFastPolicyRule `json:"rules"`
+}
+
+// DefaultOpenAIFastPolicySettings 返回默认的 OpenAI fast 策略配置。
+func DefaultOpenAIFastPolicySettings() *OpenAIFastPolicySettings {
+	return &OpenAIFastPolicySettings{
+		Rules: []OpenAIFastPolicyRule{
+			{
+				ServiceTier:    OpenAIFastTierPriority,
+				Action:         BetaPolicyActionFilter,
+				Scope:          BetaPolicyScopeAll,
+				ModelWhitelist: []string{},
+				FallbackAction: BetaPolicyActionPass,
+			},
+		},
+	}
+}
+
 // OverloadCooldownSettings 529过载冷却配置
 type OverloadCooldownSettings struct {
 	// Enabled 是否在收到529时暂停账号调度
