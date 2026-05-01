@@ -350,8 +350,8 @@ const (
 	SettingKeyResearchDrawingMaxCriticRounds     = "research_drawing_max_critic_rounds"
 	SettingKeyResearchDrawingMainModelName       = "research_drawing_main_model_name"
 	SettingKeyResearchDrawingImageGenModelName   = "research_drawing_image_gen_model_name"
-	SettingKeyResearchDrawingMaxRefineResolution = "research_drawing_max_refine_resolution"
-	SettingKeyResearchDrawingUnitPrice           = "research_drawing_unit_price"
+	SettingKeyResearchDrawingMaxRefineResolution              = "research_drawing_max_refine_resolution"
+	SettingKeyResearchDrawingUnitPrice                        = "research_drawing_unit_price"
 	SettingKeyResearchDrawingMethodOptimizationEnabled        = "research_drawing_method_optimization_enabled"
 	SettingKeyResearchDrawingMethodOptimizationDefaultEnabled = "research_drawing_method_optimization_default_enabled"
 )

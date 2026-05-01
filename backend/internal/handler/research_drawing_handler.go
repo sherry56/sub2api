@@ -254,7 +254,7 @@ func (h *ResearchDrawingHandler) submitToPaperBanana(c *gin.Context, user *servi
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var out map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
@@ -295,7 +295,7 @@ func (h *ResearchDrawingHandler) getPaperBananaImage(c *gin.Context, userID int6
 	if err != nil {
 		return nil, "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, "", err
@@ -336,7 +336,7 @@ func (h *ResearchDrawingHandler) getPaperBananaStatus(c *gin.Context, userID int
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var out map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err

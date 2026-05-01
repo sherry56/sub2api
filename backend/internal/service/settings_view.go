@@ -164,8 +164,8 @@ type SystemSettings struct {
 	ResearchDrawingMaxCriticRounds     int
 	ResearchDrawingMainModelName       string
 	ResearchDrawingImageGenModelName   string
-	ResearchDrawingMaxRefineResolution string
-	ResearchDrawingUnitPrice           float64
+	ResearchDrawingMaxRefineResolution              string
+	ResearchDrawingUnitPrice                        float64
 	ResearchDrawingMethodOptimizationEnabled        bool
 	ResearchDrawingMethodOptimizationDefaultEnabled bool
 

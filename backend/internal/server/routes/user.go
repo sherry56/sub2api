@@ -118,14 +118,5 @@ func RegisterUserRoutes(
 			monitors.GET("", h.ChannelMonitor.List)
 			monitors.GET("/:id/status", h.ChannelMonitor.GetStatus)
 		}
-
-		if h.ResearchDrawing != nil {
-			researchDrawing := authenticated.Group("/research-drawing")
-			{
-				researchDrawing.POST("/generate", h.ResearchDrawing.Generate)
-				researchDrawing.GET("/jobs/:job_id", h.ResearchDrawing.JobStatus)
-				researchDrawing.GET("/jobs/:job_id/images/:candidate_id", h.ResearchDrawing.JobImage)
-			}
-		}
 	}
 }
