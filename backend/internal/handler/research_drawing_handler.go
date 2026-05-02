@@ -31,8 +31,9 @@ const (
 	researchDrawingGPTImage2ModelName    = "gpt-image-2"
 	researchDrawingGPT55Image2AliasName  = "gpt-5.5-image2"
 	researchDrawingLegacyGPTImage2Name   = "openrouter/openai/gpt-5.4-image-2"
-	researchDrawingDefaultGPTImageBaseURL = "https://api.openai.com/v1"
 )
+
+const researchDrawingDefaultGPTImageBaseURL = "https://api.openai.com/v1"
 
 type ResearchDrawingHandler struct {
 	userService    *service.UserService
