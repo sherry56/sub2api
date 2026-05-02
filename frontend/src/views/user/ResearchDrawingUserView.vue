@@ -60,8 +60,8 @@
         </div>
       </section>
 
-      <section class="space-y-4">
-        <form class="card space-y-5 p-6" @submit.prevent="startGenerationPreview">
+      <section class="grid grid-cols-1 gap-6 lg:grid-cols-10 lg:items-start">
+        <form class="card space-y-5 p-6 lg:col-span-6" @submit.prevent="startGenerationPreview">
           <div class="border-b border-gray-100 pb-4 dark:border-dark-700">
             <h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.input.title') }}</h4>
             <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('researchDrawing.input.desc') }}</p>
@@ -248,7 +248,7 @@
           </p>
         </form>
 
-        <aside class="card space-y-5 p-6">
+        <aside class="card space-y-5 p-6 lg:col-span-4">
           <div class="border-b border-gray-100 pb-4 dark:border-dark-700">
             <h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.run.progressTitle') }}</h4>
             <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('researchDrawing.run.progressDesc') }}</p>
@@ -318,17 +318,14 @@
           >
             {{ runPreviewStarted ? t('researchDrawing.run.previewStatus') : t('researchDrawing.run.idleStatus') }}
           </p>
-        </aside>
-
-        <section class="card space-y-4 p-4 sm:p-5">
+          <section class="space-y-4 border-t border-gray-100 pt-5 dark:border-dark-700">
           <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
             {{ t('researchDrawing.run.saveHint') }}
           </div>
 
         <div
           v-if="selectedPreviewImage"
-          class="mx-auto w-full overflow-hidden rounded-lg border border-gray-100 bg-white dark:border-dark-700 dark:bg-dark-950"
-          :class="runHistoryImages.length === 1 ? 'max-w-6xl' : 'max-w-5xl'"
+          class="w-full overflow-hidden rounded-lg border border-gray-100 bg-white dark:border-dark-700 dark:bg-dark-950"
         >
           <div class="aspect-[16/10] bg-gray-50 p-2 sm:p-3 dark:bg-dark-900">
             <img
@@ -337,7 +334,7 @@
               :alt="t('researchDrawing.run.resultAlt', { id: selectedPreviewImage.candidateId + 1 })"
             />
           </div>
-          <div class="flex flex-col gap-3 border-t border-gray-100 p-3 text-sm dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
+          <div class="flex flex-col gap-3 border-t border-gray-100 p-3 text-sm dark:border-dark-700">
             <div class="min-w-0 space-y-1">
               <p class="font-semibold text-gray-900 dark:text-white">
                 {{ t('researchDrawing.run.candidateLabel', { id: selectedPreviewImage.candidateId + 1 }) }}
@@ -351,7 +348,7 @@
               </p>
             </div>
             <button
-              class="btn btn-primary shrink-0"
+              class="btn btn-primary w-full justify-center"
               type="button"
               :disabled="downloadingImageKey === getResultImageKey(selectedPreviewImage)"
               @click="downloadResultImage(selectedPreviewImage)"
@@ -363,7 +360,7 @@
 
         <div
           v-else
-          class="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm text-gray-500 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-400"
+          class="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-400"
         >
           <p v-if="runImageLoading">{{ t('researchDrawing.run.loadingImages') }}</p>
           <p v-else>{{ t('researchDrawing.run.emptyResults') }}</p>
@@ -380,7 +377,7 @@
             <article
               v-for="image in runHistoryImages"
               :key="getResultImageKey(image)"
-              class="w-56 shrink-0 overflow-hidden rounded-lg border bg-white text-left transition dark:bg-dark-950"
+              class="w-48 shrink-0 overflow-hidden rounded-lg border bg-white text-left transition dark:bg-dark-950"
               :class="selectedPreviewImage && getResultImageKey(selectedPreviewImage) === getResultImageKey(image)
                 ? 'border-primary-400 shadow-sm dark:border-primary-600'
                 : 'border-gray-100 hover:border-primary-300 dark:border-dark-700 dark:hover:border-primary-800'"
@@ -419,7 +416,8 @@
             </article>
           </div>
         </div>
-        </section>
+          </section>
+        </aside>
       </section>
 
       <div v-if="loading" class="card flex items-center justify-center py-16">
