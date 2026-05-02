@@ -6008,8 +6008,8 @@ export default {
     input: {
       title: '输入与参数',
       desc: '可先加载参考模板再改写，通常可以提升结构稳定性与出图一致性。',
-      loadMethodExample: 'Load Example (Method)',
-      loadCaptionExample: 'Load Example (Caption)',
+      loadMethodExample: '加载示例（方法）',
+      loadCaptionExample: '加载示例（图注）',
       noExample: '（不加载）',
       methodContent: '方法内容',
       methodOptimize: '开启方法内容优化（调用 GPT-5.3，把内容整理为更聚焦 Markdown；默认关闭）',
@@ -6022,7 +6022,7 @@ export default {
       normalUserHint: '普通用户仅需填写方法内容与图注，系统将自动使用默认参数。',
       validationRequired: '请先填写方法内容。',
       examples: {
-        paperVizAgentFramework: 'PaperVizAgent Framework',
+        paperVizAgentFramework: 'PaperVizAgent 框架',
       },
       placeholders: {
         methodContent: '粘贴论文方法描述或结构化提示词',
@@ -6112,14 +6112,14 @@ export default {
       disabled: '停用',
     },
     expMode: {
-      demoPlannerCritic: 'demo_planner_critic（无 Stylist）',
-      demoFull: 'demo_full（含 Stylist）',
+      demoPlannerCritic: '规划与评审',
+      demoFull: '完整流程',
     },
     retrieval: {
-      auto: 'auto',
-      manual: 'manual',
-      random: 'random',
-      none: 'none',
+      auto: '自动',
+      manual: '手动',
+      random: '随机',
+      none: '不检索',
     },
     placeholders: {
       mainModelName: '留空时使用系统默认值',

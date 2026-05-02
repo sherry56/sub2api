@@ -58,8 +58,8 @@
         </div>
       </section>
 
-      <section class="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-        <form class="card space-y-5 p-6" @submit.prevent="startGenerationPreview">
+      <section class="grid grid-cols-1 gap-6 lg:grid-cols-10 lg:items-start">
+        <form class="card self-start space-y-5 p-6 lg:col-span-6" @submit.prevent="startGenerationPreview">
           <div class="border-b border-gray-100 pb-4 dark:border-dark-700">
             <h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.input.title') }}</h4>
             <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('researchDrawing.input.desc') }}</p>
@@ -138,18 +138,18 @@
                 <label class="field-wrap">
                   <span>{{ t('researchDrawing.labels.expMode') }}</span>
                   <select v-model="form.research_drawing_exp_mode" class="input">
-                    <option value="demo_planner_critic">demo_planner_critic</option>
-                    <option value="demo_full">demo_full</option>
+                    <option value="demo_planner_critic">规划与评审</option>
+                    <option value="demo_full">完整流程</option>
                   </select>
                 </label>
 
                 <label class="field-wrap">
                   <span>{{ t('researchDrawing.labels.retrievalSetting') }}</span>
                   <select v-model="form.research_drawing_retrieval_setting" class="input">
-                    <option value="auto">auto</option>
-                    <option value="manual">manual</option>
-                    <option value="random">random</option>
-                    <option value="none">none</option>
+                    <option value="auto">自动</option>
+                    <option value="manual">手动</option>
+                    <option value="random">随机</option>
+                    <option value="none">不检索</option>
                   </select>
                 </label>
 
@@ -233,7 +233,7 @@
           </p>
         </form>
 
-        <aside class="card space-y-5 p-6">
+        <aside class="card self-start space-y-5 p-6 lg:col-span-4">
           <div class="border-b border-gray-100 pb-4 dark:border-dark-700">
             <h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.run.title') }}</h4>
             <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('researchDrawing.run.desc') }}</p>
@@ -514,28 +514,28 @@ type RunResultImage = {
   url: string
 }
 
-const DEFAULT_EXAMPLE_METHOD = `## Methodology: The PaperVizAgent Framework
+const DEFAULT_EXAMPLE_METHOD = `## 方法：PaperVizAgent 框架
 
-In this section, we present the architecture of PaperVizAgent, a reference-driven agentic framework for automated academic illustration. As illustrated in Figure \\ref{fig:methodology_diagram}, PaperVizAgent orchestrates a collaborative team of five specialized agents--Retriever, Planner, Stylist, Visualizer, and Critic--to transform raw scientific content into publication-quality diagrams and plots.
+本节介绍 PaperVizAgent 的整体架构。PaperVizAgent 是一个参考驱动的智能体框架，用于自动生成学术插图。如图 \\ref{fig:methodology_diagram} 所示，PaperVizAgent 协调五类专门智能体：检索、规划、风格、可视化和评审，将原始科研内容转换为可用于论文发表的图示与图表。
 
-### Retriever Agent
+### 检索智能体
 
-Given the source context $S$ and the communicative intent $C$, the Retriever Agent identifies the most relevant examples from a fixed reference set to guide downstream generation.
+给定源文本上下文 $S$ 和表达意图 $C$，检索智能体会从固定参考集中找到最相关的示例，用于指导后续生成过程。
 
-### Planner Agent
+### 规划智能体
 
-The Planner Agent translates source context and retrieved references into a comprehensive textual plan for the target illustration.
+规划智能体将源文本上下文和检索到的参考示例转换为目标插图的完整文字方案。
 
-### Stylist Agent
+### 风格智能体
 
-The Stylist Agent refines the plan according to academic aesthetics, including color palette, layout, typography, and visual consistency.
+风格智能体根据学术审美进一步优化方案，包括配色、布局、字体和整体视觉一致性。
 
-### Visualizer and Critic Loop
+### 可视化与评审循环
 
-The Visualizer generates candidate images from the refined plan, while the Critic checks factual alignment and visual quality, then proposes improved prompts. This loop iterates for multiple rounds to obtain publication-quality figures.`
+可视化智能体根据优化后的方案生成候选图，评审智能体检查事实一致性和视觉质量，并提出改进提示词。该循环会进行多轮迭代，以获得接近发表质量的科研图。`
 
 const DEFAULT_EXAMPLE_CAPTION =
-  'Figure 1: Overview of our PaperVizAgent framework. Given the source context and communicative intent, we first retrieve relevant reference examples and synthesize a stylistically optimized description. Then an iterative Visualizer-Critic loop performs multi-round refinement to produce the final academic figure.'
+  '图 1：PaperVizAgent 框架概览。给定源文本上下文和表达意图后，系统首先检索相关参考示例，并合成经过风格优化的描述。随后通过可视化与评审循环进行多轮细化，最终生成学术图。'
 
 const GPT_IMAGE_2_MODEL = 'openrouter/openai/gpt-5.4-image-2'
 const GPT_5_5_MODEL = 'openrouter/openai/gpt-5.5'
