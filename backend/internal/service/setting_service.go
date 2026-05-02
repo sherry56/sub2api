@@ -2420,6 +2420,9 @@ const (
 	researchDrawingDefaultAspectRatio         = "16:9"
 	researchDrawingDefaultMaxCriticRounds     = 2
 	researchDrawingDefaultMainModelName       = "openrouter/google/gemini-3-flash-preview"
+	researchDrawingGPT55ModelName             = "gpt-5.5"
+	researchDrawingGPT55AliasModelName        = "gpt5.5"
+	researchDrawingLegacyGPT55ModelName       = "openrouter/openai/gpt-5.5"
 	researchDrawingDefaultImageGenModelName   = "openrouter/google/gemini-3.1-flash-image-preview"
 	researchDrawingGPTImage2ModelName         = "gpt-image-2"
 	researchDrawingGPT55Image2AliasModelName  = "gpt-5.5-image2"
@@ -2513,8 +2516,10 @@ func normalizeResearchDrawingModelName(raw, fallback string) string {
 func normalizeResearchDrawingMainModelName(raw, fallback string) string {
 	trimmed := normalizeResearchDrawingModelName(raw, fallback)
 	switch trimmed {
-	case "openrouter/google/gemini-3-flash-preview", "openrouter/openai/gpt-5.5":
+	case "openrouter/google/gemini-3-flash-preview":
 		return trimmed
+	case researchDrawingGPT55ModelName, researchDrawingGPT55AliasModelName, researchDrawingLegacyGPT55ModelName:
+		return researchDrawingGPT55ModelName
 	default:
 		return fallback
 	}

@@ -1134,7 +1134,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		researchDrawingDefaultMaxRefineResolution = "2K"
 		researchDrawingDefaultMainModelName       = "openrouter/google/gemini-3-flash-preview"
 		researchDrawingDefaultImageGenModelName   = "openrouter/google/gemini-3.1-flash-image-preview"
-		researchDrawingGPT55ModelName             = "openrouter/openai/gpt-5.5"
+		researchDrawingGPT55ModelName             = "gpt-5.5"
+		researchDrawingGPT55AliasModelName        = "gpt5.5"
+		researchDrawingLegacyGPT55ModelName       = "openrouter/openai/gpt-5.5"
 		researchDrawingGPTImage2ModelName         = "gpt-image-2"
 		researchDrawingGPT55Image2AliasModelName  = "gpt-5.5-image2"
 		researchDrawingLegacyGPTImage2ModelName   = "openrouter/openai/gpt-5.4-image-2"
@@ -1196,7 +1198,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		req.ResearchDrawingMainModelName = req.ResearchDrawingMainModelName[:researchDrawingModelNameMaxLen]
 	}
 	switch req.ResearchDrawingMainModelName {
-	case researchDrawingDefaultMainModelName, researchDrawingGPT55ModelName:
+	case researchDrawingDefaultMainModelName:
+	case researchDrawingGPT55ModelName, researchDrawingGPT55AliasModelName, researchDrawingLegacyGPT55ModelName:
+		req.ResearchDrawingMainModelName = researchDrawingGPT55ModelName
 	default:
 		req.ResearchDrawingMainModelName = researchDrawingDefaultMainModelName
 	}

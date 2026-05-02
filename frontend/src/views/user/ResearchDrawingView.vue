@@ -537,7 +537,7 @@ const DEFAULT_EXAMPLE_CAPTION =
   '图 1：PaperVizAgent 框架概览。给定源文本上下文和表达意图后，系统首先检索相关参考示例，并合成经过风格优化的描述。随后通过可视化与评审循环进行多轮细化，最终生成学术图。'
 
 const GPT_IMAGE_2_MODEL = 'gpt-image-2'
-const GPT_5_5_MODEL = 'openrouter/openai/gpt-5.5'
+const GPT_5_5_MODEL = 'gpt-5.5'
 
 const mainModelOptions = [
   {

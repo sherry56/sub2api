@@ -24,7 +24,9 @@ import (
 const (
 	researchDrawingUnitPrice             = 2.99
 	researchDrawingDefaultMainModelName  = "openrouter/google/gemini-3-flash-preview"
-	researchDrawingGPT55ModelName        = "openrouter/openai/gpt-5.5"
+	researchDrawingGPT55ModelName        = "gpt-5.5"
+	researchDrawingGPT55AliasModelName   = "gpt5.5"
+	researchDrawingLegacyGPT55ModelName  = "openrouter/openai/gpt-5.5"
 	researchDrawingDefaultImageModelName = "openrouter/google/gemini-3.1-flash-image-preview"
 	researchDrawingGPTImage2ModelName    = "gpt-image-2"
 	researchDrawingGPT55Image2AliasName  = "gpt-5.5-image2"
@@ -392,7 +394,9 @@ func (r *ResearchDrawingGenerateRequest) normalize() {
 		r.MainModelName = r.MainModelName[:200]
 	}
 	switch r.MainModelName {
-	case researchDrawingDefaultMainModelName, researchDrawingGPT55ModelName:
+	case researchDrawingDefaultMainModelName:
+	case researchDrawingGPT55ModelName, researchDrawingGPT55AliasModelName, researchDrawingLegacyGPT55ModelName:
+		r.MainModelName = researchDrawingGPT55ModelName
 	default:
 		r.MainModelName = researchDrawingDefaultMainModelName
 	}
