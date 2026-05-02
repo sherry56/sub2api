@@ -121,13 +121,47 @@
 
           <section class="space-y-4 rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900">
             <h5 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.sections.generation') }}</h5>
-            <label class="field-wrap">
-              <span>{{ t('researchDrawing.input.generationMode') }}</span>
-              <select v-model="generationInput.generationMode" class="input">
-                <option value="default">{{ t('researchDrawing.input.defaultMode') }}</option>
-                <option value="custom">{{ t('researchDrawing.input.customMode') }}</option>
-              </select>
-            </label>
+            <div class="grid gap-4 lg:grid-cols-3">
+              <label class="field-wrap">
+                <span>{{ t('researchDrawing.input.generationMode') }}</span>
+                <select v-model="generationInput.generationMode" class="input">
+                  <option value="default">{{ t('researchDrawing.input.defaultMode') }}</option>
+                  <option value="custom">{{ t('researchDrawing.input.customMode') }}</option>
+                </select>
+              </label>
+
+              <label class="field-wrap">
+                <span>{{ t('researchDrawing.labels.mainModelName') }}</span>
+                <select v-model="form.research_drawing_main_model_name" class="input">
+                  <option
+                    v-for="option in mainModelOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="field-wrap">
+                <span>{{ t('researchDrawing.labels.imageGenModelName') }}</span>
+                <select v-model="form.research_drawing_image_gen_model_name" class="input">
+                  <option
+                    v-for="option in imageModelOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+                <span
+                  v-if="form.research_drawing_image_gen_model_name === GPT_IMAGE_2_MODEL"
+                  class="text-xs text-amber-600 dark:text-amber-300"
+                >
+                  GPT Image 2 将使用 GPT_API_KEY 和 GPT_BASE_URL。
+                </span>
+              </label>
+            </div>
 
             <p
               v-if="generationInput.generationMode === 'custom'"
@@ -178,45 +212,11 @@
                 </label>
 
                 <label class="field-wrap">
-                  <span>{{ t('researchDrawing.labels.mainModelName') }}</span>
-                  <select v-model="form.research_drawing_main_model_name" class="input">
-                    <option
-                      v-for="option in mainModelOptions"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </option>
-                  </select>
-                </label>
-              </div>
-
-              <div class="grid gap-4 md:grid-cols-2">
-                <label class="field-wrap">
                   <span>{{ t('researchDrawing.labels.maxRefineResolution') }}</span>
                   <select v-model="form.research_drawing_max_refine_resolution" class="input">
                     <option value="2K">2K</option>
                     <option value="4K">4K</option>
                   </select>
-                </label>
-
-                <label class="field-wrap">
-                  <span>{{ t('researchDrawing.labels.imageGenModelName') }}</span>
-                  <select v-model="form.research_drawing_image_gen_model_name" class="input">
-                    <option
-                      v-for="option in imageModelOptions"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </option>
-                  </select>
-                  <span
-                    v-if="form.research_drawing_image_gen_model_name === GPT_IMAGE_2_MODEL"
-                    class="text-xs text-amber-600 dark:text-amber-300"
-                  >
-                    GPT Image 2 将使用独立的 API Key 和 Base URL。
-                  </span>
                 </label>
               </div>
             </div>
@@ -530,7 +530,7 @@
                 v-model="form.research_drawing_gpt_image_api_key"
                 class="input"
                 type="password"
-                :placeholder="lastSettings?.research_drawing_gpt_image_api_key_configured ? t('researchDrawing.input.keepExistingSecret') : 'GPT_IMAGE_API_KEY'"
+                :placeholder="lastSettings?.research_drawing_gpt_image_api_key_configured ? t('researchDrawing.input.keepExistingSecret') : 'GPT_API_KEY'"
                 autocomplete="new-password"
               />
             </label>
@@ -614,7 +614,7 @@
                 v-if="form.research_drawing_image_gen_model_name === GPT_IMAGE_2_MODEL"
                 class="text-xs text-amber-600 dark:text-amber-300"
               >
-                GPT Image 2 将使用独立的 API Key 和 Base URL。
+                GPT Image 2 将使用 GPT_API_KEY 和 GPT_BASE_URL。
               </span>
             </label>
           </div>
@@ -722,7 +722,7 @@ const baseImageModelOptions = [
     value: 'openrouter/google/gemini-3.1-flash-image-preview',
   },
   {
-    label: 'GPT-5.5-Image-2',
+    label: 'GPT Image 2',
     value: GPT_IMAGE_2_MODEL,
   },
 ]
@@ -1011,6 +1011,8 @@ async function startGenerationPreview() {
       caption: generationInput.caption,
       generation_mode: generationInput.generationMode,
       optimize_method_content: isCustomGenerationMode.value ? generationInput.optimizeMethodContent : false,
+      main_model_name: form.research_drawing_main_model_name,
+      image_gen_model_name: form.research_drawing_image_gen_model_name,
       ...(isCustomGenerationMode.value
         ? {
             exp_mode: form.research_drawing_exp_mode,
@@ -1019,8 +1021,6 @@ async function startGenerationPreview() {
             aspect_ratio: form.research_drawing_aspect_ratio,
             max_critic_rounds: form.research_drawing_max_critic_rounds,
             max_refine_resolution: form.research_drawing_max_refine_resolution,
-            main_model_name: form.research_drawing_main_model_name,
-            image_gen_model_name: form.research_drawing_image_gen_model_name,
           }
         : {}),
     }

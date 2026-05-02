@@ -2421,12 +2421,8 @@ const (
 	researchDrawingDefaultMaxCriticRounds     = 2
 	researchDrawingDefaultMainModelName       = "openrouter/google/gemini-3-flash-preview"
 	researchDrawingGPT55ModelName             = "gpt-5.5"
-	researchDrawingGPT55AliasModelName        = "gpt5.5"
-	researchDrawingLegacyGPT55ModelName       = "openrouter/openai/gpt-5.5"
 	researchDrawingDefaultImageGenModelName   = "openrouter/google/gemini-3.1-flash-image-preview"
 	researchDrawingGPTImage2ModelName         = "gpt-image-2"
-	researchDrawingGPT55Image2AliasModelName  = "gpt-5.5-image2"
-	researchDrawingLegacyGPTImage2ModelName   = "openrouter/openai/gpt-5.4-image-2"
 	researchDrawingDefaultGPTImageBaseURL     = "https://api.openai.com/v1"
 	researchDrawingDefaultMaxRefineResolution = "2K"
 	researchDrawingDefaultUnitPrice           = 2.99
@@ -2518,8 +2514,8 @@ func normalizeResearchDrawingMainModelName(raw, fallback string) string {
 	switch trimmed {
 	case "openrouter/google/gemini-3-flash-preview":
 		return trimmed
-	case researchDrawingGPT55ModelName, researchDrawingGPT55AliasModelName, researchDrawingLegacyGPT55ModelName:
-		return researchDrawingGPT55ModelName
+	case researchDrawingGPT55ModelName:
+		return trimmed
 	default:
 		return fallback
 	}
@@ -2530,8 +2526,8 @@ func normalizeResearchDrawingImageModelName(raw, fallback string) string {
 	switch trimmed {
 	case "openrouter/google/gemini-3.1-flash-image-preview":
 		return trimmed
-	case researchDrawingGPTImage2ModelName, researchDrawingGPT55Image2AliasModelName, researchDrawingLegacyGPTImage2ModelName:
-		return researchDrawingGPTImage2ModelName
+	case researchDrawingGPTImage2ModelName:
+		return trimmed
 	default:
 		return fallback
 	}

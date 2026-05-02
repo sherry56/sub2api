@@ -118,13 +118,47 @@
           </label>
 
           <template v-if="isAdmin">
-            <label class="field-wrap">
-              <span>{{ t('researchDrawing.input.generationMode') }}</span>
-              <select v-model="generationInput.generationMode" class="input">
-                <option value="default">{{ t('researchDrawing.input.defaultMode') }}</option>
-                <option value="custom">{{ t('researchDrawing.input.customMode') }}</option>
-              </select>
-            </label>
+            <div class="grid gap-4 lg:grid-cols-3">
+              <label class="field-wrap">
+                <span>{{ t('researchDrawing.input.generationMode') }}</span>
+                <select v-model="generationInput.generationMode" class="input">
+                  <option value="default">{{ t('researchDrawing.input.defaultMode') }}</option>
+                  <option value="custom">{{ t('researchDrawing.input.customMode') }}</option>
+                </select>
+              </label>
+
+              <label class="field-wrap">
+                <span>{{ t('researchDrawing.labels.mainModelName') }}</span>
+                <select v-model="form.research_drawing_main_model_name" class="input">
+                  <option
+                    v-for="option in mainModelOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="field-wrap">
+                <span>{{ t('researchDrawing.labels.imageGenModelName') }}</span>
+                <select v-model="form.research_drawing_image_gen_model_name" class="input">
+                  <option
+                    v-for="option in imageModelOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+                <span
+                  v-if="form.research_drawing_image_gen_model_name === GPT_IMAGE_2_MODEL"
+                  class="text-xs text-amber-600 dark:text-amber-300"
+                >
+                  GPT Image 2 将使用 GPT_API_KEY 和 GPT_BASE_URL。
+                </span>
+              </label>
+            </div>
 
             <p
               v-if="generationInput.generationMode === 'custom'"
@@ -175,31 +209,13 @@
                 </label>
 
                 <label class="field-wrap">
-                  <span>{{ t('researchDrawing.labels.mainModelName') }}</span>
-                  <select v-model="form.research_drawing_main_model_name" class="input">
-                    <option
-                      v-for="option in mainModelOptions"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </option>
+                  <span>{{ t('researchDrawing.labels.maxRefineResolution') }}</span>
+                  <select v-model="form.research_drawing_max_refine_resolution" class="input">
+                    <option value="2K">2K</option>
+                    <option value="4K">4K</option>
                   </select>
                 </label>
               </div>
-
-              <label class="field-wrap">
-                <span>{{ t('researchDrawing.labels.imageGenModelName') }}</span>
-                <select v-model="form.research_drawing_image_gen_model_name" class="input">
-                  <option
-                    v-for="option in imageModelOptions"
-                    :key="option.value"
-                    :value="option.value"
-                  >
-                    {{ option.label }}
-                  </option>
-                </select>
-              </label>
             </div>
           </template>
 
@@ -321,8 +337,144 @@
           >
             {{ runPreviewStarted ? t('researchDrawing.run.previewStatus') : t('researchDrawing.run.idleStatus') }}
           </p>
+
+          <section class="space-y-4">
+            <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+              {{ t('researchDrawing.run.saveHint') }}
+            </div>
+
+            <article
+              v-if="selectedPreviewImage"
+              class="overflow-hidden rounded-lg border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900"
+            >
+              <button
+                class="block aspect-[16/10] w-full cursor-zoom-in bg-gray-50 dark:bg-dark-950"
+                type="button"
+                :aria-label="t('researchDrawing.run.openLargePreview')"
+                @click="openLargePreview(selectedPreviewImage)"
+              >
+                <img
+                  class="h-full w-full object-contain p-2"
+                  :src="selectedPreviewImage.url"
+                  :alt="t('researchDrawing.run.resultAlt', { id: selectedPreviewImage.candidateId + 1 })"
+                />
+              </button>
+              <div class="flex flex-col gap-3 p-3 sm:flex-row sm:items-end sm:justify-between">
+                <div class="min-w-0 text-xs leading-5 text-gray-500 dark:text-dark-400">
+                  <p class="font-semibold text-gray-900 dark:text-white">
+                    {{ t('researchDrawing.run.candidateLabel', { id: selectedPreviewImage.candidateId + 1 }) }}
+                  </p>
+                  <p>{{ t('researchDrawing.run.generatedAt') }}：{{ formatGeneratedAt(selectedPreviewImage.generatedAt) }}</p>
+                  <p class="truncate">{{ t('researchDrawing.run.jobId') }}：{{ selectedPreviewImage.jobId }}</p>
+                  <p>候选图 ID：{{ selectedPreviewImage.candidateId }}</p>
+                </div>
+                <button
+                  class="btn btn-primary whitespace-nowrap"
+                  type="button"
+                  :disabled="downloadingImageKey === getResultImageKey(selectedPreviewImage)"
+                  @click="downloadResultImage(selectedPreviewImage)"
+                >
+                  {{ downloadingImageKey === getResultImageKey(selectedPreviewImage) ? t('common.processing') : t('researchDrawing.run.download2k') }}
+                </button>
+              </div>
+            </article>
+
+            <div v-else class="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-500 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-400">
+              <p v-if="runImageLoading">{{ t('researchDrawing.run.loadingImages') }}</p>
+              <p v-else>{{ t('researchDrawing.run.emptyResults') }}</p>
+            </div>
+          </section>
+
+          <div v-if="runHistoryImages.length" class="space-y-2">
+            <div class="flex items-center justify-between gap-3">
+              <h5 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.run.sessionHistoryTitle') }}</h5>
+              <span class="text-xs text-gray-500 dark:text-dark-400">
+                {{ t('researchDrawing.run.sessionHistoryLimit', { count: RUN_HISTORY_LIMIT }) }}
+              </span>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <article
+                v-for="image in runHistoryImages"
+                :key="getResultImageKey(image)"
+                class="rounded-lg border bg-white p-2 transition dark:bg-dark-900"
+                :class="selectedPreviewImage && getResultImageKey(selectedPreviewImage) === getResultImageKey(image)
+                  ? 'border-primary-400 shadow-sm dark:border-primary-500'
+                  : 'border-gray-100 hover:border-primary-200 dark:border-dark-700 dark:hover:border-primary-800'"
+              >
+                <button class="block w-full cursor-zoom-in text-left" type="button" @click="openLargePreview(image)">
+                  <div class="aspect-[4/3] bg-gray-50 dark:bg-dark-950">
+                    <img
+                      class="h-full w-full object-contain p-1"
+                      :src="image.url"
+                      :alt="t('researchDrawing.run.resultAlt', { id: image.candidateId + 1 })"
+                    />
+                  </div>
+                  <div class="mt-2 space-y-1 text-[11px] leading-4 text-gray-500 dark:text-dark-400">
+                    <p class="font-semibold text-gray-800 dark:text-dark-100">
+                      {{ t('researchDrawing.run.candidateLabel', { id: image.candidateId + 1 }) }}
+                    </p>
+                    <p>{{ formatGeneratedAt(image.generatedAt) }}</p>
+                    <p class="truncate">{{ image.jobId }}</p>
+                  </div>
+                </button>
+                <button
+                  class="btn btn-secondary mt-2 w-full text-xs"
+                  type="button"
+                  :disabled="downloadingImageKey === getResultImageKey(image)"
+                  @click.stop="downloadResultImage(image)"
+                >
+                  {{ downloadingImageKey === getResultImageKey(image) ? t('common.processing') : t('researchDrawing.run.download2k') }}
+                </button>
+              </article>
+            </div>
+          </div>
         </aside>
       </section>
+
+      <div
+        v-if="largePreviewImage"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+        role="dialog"
+        aria-modal="true"
+        @click.self="closeLargePreview"
+      >
+        <div class="max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-lg bg-white shadow-2xl dark:bg-dark-900">
+          <div class="flex items-start justify-between gap-4 border-b border-gray-100 p-4 dark:border-dark-700">
+            <div class="min-w-0">
+              <h4 class="text-base font-semibold text-gray-900 dark:text-white">
+                {{ t('researchDrawing.run.largePreviewTitle') }}
+              </h4>
+              <p class="mt-1 truncate text-xs text-gray-500 dark:text-dark-400">
+                {{ t('researchDrawing.run.jobId') }}：{{ largePreviewImage.jobId }}
+              </p>
+              <p class="text-xs text-gray-500 dark:text-dark-400">
+                候选图 ID：{{ largePreviewImage.candidateId }}
+              </p>
+            </div>
+            <button class="btn btn-secondary" type="button" @click="closeLargePreview">
+              {{ t('common.close') }}
+            </button>
+          </div>
+          <div class="max-h-[70vh] bg-gray-50 p-3 dark:bg-dark-950">
+            <img
+              class="mx-auto max-h-[66vh] w-full object-contain"
+              :src="largePreviewImage.url"
+              :alt="t('researchDrawing.run.resultAlt', { id: largePreviewImage.candidateId + 1 })"
+            />
+          </div>
+          <div class="flex flex-col gap-3 p-4 text-sm text-gray-500 dark:text-dark-400 sm:flex-row sm:items-center sm:justify-between">
+            <span>{{ t('researchDrawing.run.generatedAt') }}：{{ formatGeneratedAt(largePreviewImage.generatedAt) }}</span>
+            <button
+              class="btn btn-primary"
+              type="button"
+              :disabled="downloadingImageKey === getResultImageKey(largePreviewImage)"
+              @click="downloadResultImage(largePreviewImage)"
+            >
+              {{ downloadingImageKey === getResultImageKey(largePreviewImage) ? t('common.processing') : t('researchDrawing.run.download2k') }}
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div v-if="loading" class="card flex items-center justify-center py-16">
         <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></div>
@@ -509,7 +661,10 @@ type PaperBananaGenerationInput = {
 }
 
 type RunResultImage = {
+  jobId: string
   candidateId: number
+  paperBananaUser: string
+  generatedAt: string
   url: string
 }
 
@@ -558,12 +713,13 @@ const imageModelOptions = [
     value: 'openrouter/google/gemini-3.1-flash-image-preview',
   },
   {
-    label: 'GPT-5.5-Image-2',
+    label: 'GPT Image 2',
     value: GPT_IMAGE_2_MODEL,
   },
 ]
 
 const allowedImageModelValues = new Set(imageModelOptions.map((option) => option.value))
+const RUN_HISTORY_LIMIT = 6
 
 const RESEARCH_DRAWING_DEFAULTS: ResearchDrawingForm = {
   research_drawing_exp_mode: 'demo_planner_critic',
@@ -602,7 +758,10 @@ const runPaperBananaUser = ref('')
 const runJobStatus = ref<ResearchDrawingJobStatus | null>(null)
 const runImageLoading = ref(false)
 const runResultImages = ref<RunResultImage[]>([])
+const runHistoryImages = ref<RunResultImage[]>([])
 const selectedResultImage = ref<RunResultImage | null>(null)
+const largePreviewImage = ref<RunResultImage | null>(null)
+const downloadingImageKey = ref('')
 let runPollTimer: number | null = null
 const isAdmin = computed(() => authStore.isAdmin)
 
@@ -615,6 +774,7 @@ const generationInput = reactive<PaperBananaGenerationInput>({
 })
 
 const isCustomGenerationMode = computed(() => generationInput.generationMode === 'custom')
+const selectedPreviewImage = computed(() => selectedResultImage.value || runHistoryImages.value[0] || null)
 
 const methodOptimizationEnabled = computed(() => form.research_drawing_method_optimization_enabled !== false)
 
@@ -756,6 +916,7 @@ function resetGenerationInput() {
   runJobStatus.value = null
   runImageLoading.value = false
   selectedResultImage.value = null
+  largePreviewImage.value = null
   revokeRunImages()
   stopRunPolling()
 }
@@ -773,7 +934,8 @@ async function startGenerationPreview() {
   runPreviewStarted.value = true
   runJobStatus.value = { status: 'running' }
   selectedResultImage.value = null
-  revokeRunImages()
+  largePreviewImage.value = null
+  runResultImages.value = []
   stopRunPolling()
   try {
     const payload: ResearchDrawingGenerateRequest = {
@@ -781,6 +943,8 @@ async function startGenerationPreview() {
       caption: generationInput.caption,
       optimize_method_content: isCustomGenerationMode.value ? generationInput.optimizeMethodContent : false,
       generation_mode: generationInput.generationMode,
+      main_model_name: form.research_drawing_main_model_name,
+      image_gen_model_name: form.research_drawing_image_gen_model_name,
       ...(isCustomGenerationMode.value
         ? {
             exp_mode: form.research_drawing_exp_mode,
@@ -788,8 +952,7 @@ async function startGenerationPreview() {
             num_candidates: form.research_drawing_num_candidates,
             aspect_ratio: form.research_drawing_aspect_ratio,
             max_critic_rounds: form.research_drawing_max_critic_rounds,
-            main_model_name: form.research_drawing_main_model_name,
-            image_gen_model_name: form.research_drawing_image_gen_model_name,
+            max_refine_resolution: form.research_drawing_max_refine_resolution,
           }
         : {}),
     }
@@ -864,17 +1027,22 @@ async function loadRunImages(status: ResearchDrawingJobStatus) {
     return
   }
   runImageLoading.value = true
-  revokeRunImages()
+  runResultImages.value = []
   try {
     const images: RunResultImage[] = []
+    const generatedAt = new Date().toISOString()
     for (const candidateId of candidateIds) {
       const blob = await researchDrawingAPI.getJobImage(runJobId.value, candidateId, runPaperBananaUser.value)
       images.push({
+        jobId: runJobId.value,
         candidateId,
+        paperBananaUser: runPaperBananaUser.value,
+        generatedAt,
         url: URL.createObjectURL(blob),
       })
     }
     runResultImages.value = images
+    appendRunHistory(images)
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, t('researchDrawing.run.imagesFailed')))
   } finally {
@@ -883,8 +1051,63 @@ async function loadRunImages(status: ResearchDrawingJobStatus) {
 }
 
 function revokeRunImages() {
-  runResultImages.value.forEach((image) => URL.revokeObjectURL(image.url))
+  runHistoryImages.value.forEach((image) => URL.revokeObjectURL(image.url))
+  runHistoryImages.value = []
   runResultImages.value = []
+  largePreviewImage.value = null
+}
+
+function openLargePreview(image: RunResultImage) {
+  selectedResultImage.value = image
+  largePreviewImage.value = image
+}
+
+function closeLargePreview() {
+  largePreviewImage.value = null
+}
+
+function appendRunHistory(images: RunResultImage[]) {
+  const next = [...images, ...runHistoryImages.value]
+  const kept = next.slice(0, RUN_HISTORY_LIMIT)
+  next.slice(RUN_HISTORY_LIMIT).forEach((image) => URL.revokeObjectURL(image.url))
+  runHistoryImages.value = kept
+  selectedResultImage.value = images[0] || kept[0] || null
+}
+
+function getResultImageKey(image: RunResultImage) {
+  return `${image.jobId}:${image.candidateId}`
+}
+
+function formatGeneratedAt(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return date.toLocaleString()
+}
+
+async function downloadResultImage(image: RunResultImage) {
+  const key = getResultImageKey(image)
+  if (downloadingImageKey.value) {
+    return
+  }
+  downloadingImageKey.value = key
+  try {
+    // TODO(research-drawing): switch this to the real PaperBanana 2K export endpoint when it is exposed.
+    const blob = await researchDrawingAPI.getJobImage(image.jobId, image.candidateId, image.paperBananaUser)
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = `research-drawing-${image.jobId}-${image.candidateId}.png`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('researchDrawing.run.downloadFailed')))
+  } finally {
+    downloadingImageKey.value = ''
+  }
 }
 
 function formatDuration(seconds: number) {
