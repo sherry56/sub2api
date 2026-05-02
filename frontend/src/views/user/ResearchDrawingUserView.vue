@@ -1129,10 +1129,6 @@ function revokeRunImages() {
   largePreviewImage.value = null
 }
 
-function openResultImage(image: RunResultImage) {
-  selectedResultImage.value = image
-}
-
 function openLargePreview(image: RunResultImage) {
   selectedResultImage.value = image
   largePreviewImage.value = image
