@@ -164,6 +164,9 @@ type SystemSettings struct {
 	ResearchDrawingMaxCriticRounds                  int
 	ResearchDrawingMainModelName                    string
 	ResearchDrawingImageGenModelName                string
+	ResearchDrawingGPTImageAPIKey                   string
+	ResearchDrawingGPTImageAPIKeyConfigured         bool
+	ResearchDrawingGPTImageBaseURL                  string
 	ResearchDrawingMaxRefineResolution              string
 	ResearchDrawingUnitPrice                        float64
 	ResearchDrawingMethodOptimizationEnabled        bool

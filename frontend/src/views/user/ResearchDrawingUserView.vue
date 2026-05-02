@@ -215,7 +215,7 @@
                     v-if="form.research_drawing_image_gen_model_name === GPT_IMAGE_2_MODEL"
                     class="text-xs text-amber-600 dark:text-amber-300"
                   >
-                    PaperBanana 暂未接入该模型支持。
+                    GPT Image 2 将使用独立的 API Key 和 Base URL。
                   </span>
                 </label>
               </div>
@@ -225,7 +225,6 @@
           <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm text-gray-600 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-300">
             <span>{{ t('researchDrawing.run.estimatedTime') }}：</span>
             <b class="text-gray-900 dark:text-white">{{ t('researchDrawing.run.noHistory') }}</b>
-            <span class="text-gray-500 dark:text-dark-400">（{{ t('researchDrawing.run.noHistoryHint') }}）</span>
           </div>
 
           <div class="flex flex-wrap gap-3">
@@ -327,13 +326,20 @@
           v-if="selectedPreviewImage"
           class="w-full overflow-hidden rounded-lg border border-gray-100 bg-white dark:border-dark-700 dark:bg-dark-950"
         >
-          <div class="aspect-[16/10] bg-gray-50 p-2 sm:p-3 dark:bg-dark-900">
+          <button
+            class="block w-full cursor-zoom-in"
+            type="button"
+            :aria-label="t('researchDrawing.run.openLargePreview')"
+            @click="openLargePreview(selectedPreviewImage)"
+          >
+          <span class="block aspect-[16/10] bg-gray-50 p-2 sm:p-3 dark:bg-dark-900">
             <img
               class="h-full w-full object-contain"
               :src="selectedPreviewImage.url"
               :alt="t('researchDrawing.run.resultAlt', { id: selectedPreviewImage.candidateId + 1 })"
             />
-          </div>
+          </span>
+          </button>
           <div class="flex flex-col gap-3 border-t border-gray-100 p-3 text-sm dark:border-dark-700">
             <div class="min-w-0 space-y-1">
               <p class="font-semibold text-gray-900 dark:text-white">
@@ -382,7 +388,7 @@
                 ? 'border-primary-400 shadow-sm dark:border-primary-600'
                 : 'border-gray-100 hover:border-primary-300 dark:border-dark-700 dark:hover:border-primary-800'"
             >
-              <button class="block w-full text-left" type="button" @click="openResultImage(image)">
+              <button class="block w-full cursor-zoom-in text-left" type="button" @click="openLargePreview(image)">
                 <img
                   class="aspect-[4/3] w-full bg-gray-50 object-contain p-1.5 dark:bg-dark-900"
                   :src="image.url"
@@ -419,6 +425,52 @@
           </section>
         </aside>
       </section>
+
+      <div
+        v-if="largePreviewImage"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+        role="dialog"
+        aria-modal="true"
+        @click.self="closeLargePreview"
+      >
+        <div class="flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-dark-950">
+          <div class="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-dark-700">
+            <div class="min-w-0">
+              <p class="font-semibold text-gray-900 dark:text-white">
+                {{ t('researchDrawing.run.largePreviewTitle') }}
+              </p>
+              <p class="truncate text-xs text-gray-500 dark:text-dark-400">
+                {{ t('researchDrawing.run.jobId') }}：{{ largePreviewImage.jobId }}
+                <span class="mx-1">/</span>
+                候选图 ID：{{ largePreviewImage.candidateId }}
+              </p>
+            </div>
+            <button class="btn btn-secondary" type="button" @click="closeLargePreview">
+              {{ t('common.close') }}
+            </button>
+          </div>
+          <div class="flex min-h-0 flex-1 items-center justify-center bg-gray-50 p-3 dark:bg-dark-900">
+            <img
+              class="max-h-[78vh] max-w-full object-contain"
+              :src="largePreviewImage.url"
+              :alt="t('researchDrawing.run.resultAlt', { id: largePreviewImage.candidateId + 1 })"
+            />
+          </div>
+          <div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-3 dark:border-dark-700">
+            <span class="text-xs text-gray-500 dark:text-dark-400">
+              {{ t('researchDrawing.run.generatedAt') }}：{{ formatGeneratedAt(largePreviewImage.generatedAt) }}
+            </span>
+            <button
+              class="btn btn-primary"
+              type="button"
+              :disabled="downloadingImageKey === getResultImageKey(largePreviewImage)"
+              @click="downloadResultImage(largePreviewImage)"
+            >
+              {{ downloadingImageKey === getResultImageKey(largePreviewImage) ? t('common.processing') : t('researchDrawing.run.download2k') }}
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div v-if="loading" class="card flex items-center justify-center py-16">
         <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></div>
@@ -458,6 +510,29 @@
                 <option value="21:9">21:9</option>
                 <option value="3:2">3:2</option>
               </select>
+            </label>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-2">
+            <label class="field-wrap">
+              <span>{{ t('researchDrawing.labels.gptImageBaseURL') }}</span>
+              <input
+                v-model="form.research_drawing_gpt_image_base_url"
+                class="input"
+                type="url"
+                placeholder="https://api.openai.com/v1"
+              />
+            </label>
+
+            <label class="field-wrap">
+              <span>{{ t('researchDrawing.labels.gptImageAPIKey') }}</span>
+              <input
+                v-model="form.research_drawing_gpt_image_api_key"
+                class="input"
+                type="password"
+                :placeholder="lastSettings?.research_drawing_gpt_image_api_key_configured ? t('researchDrawing.input.keepExistingSecret') : 'GPT_IMAGE_API_KEY'"
+                autocomplete="new-password"
+              />
             </label>
           </div>
         </section>
@@ -539,7 +614,7 @@
                 v-if="form.research_drawing_image_gen_model_name === GPT_IMAGE_2_MODEL"
                 class="text-xs text-amber-600 dark:text-amber-300"
               >
-                PaperBanana 暂未接入该模型支持。
+                GPT Image 2 将使用独立的 API Key 和 Base URL。
               </span>
             </label>
           </div>
@@ -579,6 +654,8 @@ type ResearchDrawingForm = {
   research_drawing_max_critic_rounds: number
   research_drawing_main_model_name: string
   research_drawing_image_gen_model_name: string
+  research_drawing_gpt_image_api_key: string
+  research_drawing_gpt_image_base_url: string
   research_drawing_max_refine_resolution: string
   research_drawing_unit_price: number
 }
@@ -623,7 +700,7 @@ const DEFAULT_EXAMPLE_METHOD = `## 方法：PaperVizAgent 框架
 const DEFAULT_EXAMPLE_CAPTION =
   '图 1：PaperVizAgent 框架概览。给定源文本上下文和表达意图后，系统首先检索相关参考示例，并合成经过风格优化的描述。随后通过可视化与评审循环进行多轮细化，最终生成学术图。'
 
-const GPT_IMAGE_2_MODEL = 'openrouter/openai/gpt-5.4-image-2'
+const GPT_IMAGE_2_MODEL = 'gpt-image-2'
 const GPT_5_5_MODEL = 'openrouter/openai/gpt-5.5'
 
 const baseMainModelOptions = [
@@ -644,9 +721,8 @@ const baseImageModelOptions = [
     label: 'Gemini 3.1 Flash Image Preview',
     value: 'openrouter/google/gemini-3.1-flash-image-preview',
   },
-  // TODO(research-drawing): wire this through PaperBanana after upstream support is confirmed.
   {
-    label: 'GPT Image 2',
+    label: 'GPT-5.5-Image-2',
     value: GPT_IMAGE_2_MODEL,
   },
 ]
@@ -661,6 +737,8 @@ const RESEARCH_DRAWING_DEFAULTS: ResearchDrawingForm = {
   research_drawing_max_critic_rounds: 2,
   research_drawing_main_model_name: 'openrouter/google/gemini-3-flash-preview',
   research_drawing_image_gen_model_name: 'openrouter/google/gemini-3.1-flash-image-preview',
+  research_drawing_gpt_image_api_key: '',
+  research_drawing_gpt_image_base_url: 'https://api.openai.com/v1',
   research_drawing_max_refine_resolution: '2K',
   research_drawing_unit_price: 2.99,
 }
@@ -690,6 +768,7 @@ const runImageLoading = ref(false)
 const runResultImages = ref<RunResultImage[]>([])
 const runHistoryImages = ref<RunResultImage[]>([])
 const selectedResultImage = ref<RunResultImage | null>(null)
+const largePreviewImage = ref<RunResultImage | null>(null)
 const downloadingImageKey = ref('')
 let runPollTimer: number | null = null
 let exampleCarouselTimer: number | null = null
@@ -868,6 +947,9 @@ function normalizeFormValues() {
   if (!allowedImageModelValues.has(form.research_drawing_image_gen_model_name)) {
     form.research_drawing_image_gen_model_name = RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
   }
+  form.research_drawing_gpt_image_base_url =
+    form.research_drawing_gpt_image_base_url?.trim().replace(/\/+$/, '') || RESEARCH_DRAWING_DEFAULTS.research_drawing_gpt_image_base_url
+  form.research_drawing_gpt_image_api_key = form.research_drawing_gpt_image_api_key?.trim() || ''
   form.research_drawing_unit_price = Math.max(
     0.01,
     Number(form.research_drawing_unit_price) || RESEARCH_DRAWING_DEFAULTS.research_drawing_unit_price,
@@ -883,6 +965,8 @@ function applySettings(settings: SystemSettings) {
   form.research_drawing_max_critic_rounds = settings.research_drawing_max_critic_rounds || RESEARCH_DRAWING_DEFAULTS.research_drawing_max_critic_rounds
   form.research_drawing_main_model_name = settings.research_drawing_main_model_name || RESEARCH_DRAWING_DEFAULTS.research_drawing_main_model_name
   form.research_drawing_image_gen_model_name = settings.research_drawing_image_gen_model_name || RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
+  form.research_drawing_gpt_image_api_key = ''
+  form.research_drawing_gpt_image_base_url = settings.research_drawing_gpt_image_base_url || RESEARCH_DRAWING_DEFAULTS.research_drawing_gpt_image_base_url
   form.research_drawing_max_refine_resolution = settings.research_drawing_max_refine_resolution || RESEARCH_DRAWING_DEFAULTS.research_drawing_max_refine_resolution
   form.research_drawing_unit_price = settings.research_drawing_unit_price || RESEARCH_DRAWING_DEFAULTS.research_drawing_unit_price
   normalizeFormValues()
@@ -901,6 +985,7 @@ function resetGenerationInput() {
   runJobStatus.value = null
   runImageLoading.value = false
   selectedResultImage.value = null
+  largePreviewImage.value = null
   runResultImages.value = []
   stopRunPolling()
 }
@@ -1041,10 +1126,20 @@ function revokeRunImages() {
   runHistoryImages.value.forEach((image) => URL.revokeObjectURL(image.url))
   runHistoryImages.value = []
   runResultImages.value = []
+  largePreviewImage.value = null
 }
 
 function openResultImage(image: RunResultImage) {
   selectedResultImage.value = image
+}
+
+function openLargePreview(image: RunResultImage) {
+  selectedResultImage.value = image
+  largePreviewImage.value = image
+}
+
+function closeLargePreview() {
+  largePreviewImage.value = null
 }
 
 function appendRunHistory(images: RunResultImage[]) {
@@ -1137,6 +1232,8 @@ async function saveSettings() {
       research_drawing_max_critic_rounds: form.research_drawing_max_critic_rounds,
       research_drawing_main_model_name: form.research_drawing_main_model_name,
       research_drawing_image_gen_model_name: form.research_drawing_image_gen_model_name,
+      research_drawing_gpt_image_api_key: form.research_drawing_gpt_image_api_key,
+      research_drawing_gpt_image_base_url: form.research_drawing_gpt_image_base_url,
       research_drawing_max_refine_resolution: form.research_drawing_max_refine_resolution,
       research_drawing_unit_price: form.research_drawing_unit_price,
     }

@@ -26,7 +26,10 @@ const (
 	researchDrawingDefaultMainModelName  = "openrouter/google/gemini-3-flash-preview"
 	researchDrawingGPT55ModelName        = "openrouter/openai/gpt-5.5"
 	researchDrawingDefaultImageModelName = "openrouter/google/gemini-3.1-flash-image-preview"
-	researchDrawingGPTImage2ModelName    = "openrouter/openai/gpt-5.4-image-2"
+	researchDrawingGPTImage2ModelName    = "gpt-image-2"
+	researchDrawingGPT55Image2AliasName  = "gpt-5.5-image2"
+	researchDrawingLegacyGPTImage2Name   = "openrouter/openai/gpt-5.4-image-2"
+	researchDrawingDefaultGPTImageBaseURL = "https://api.openai.com/v1"
 )
 
 type ResearchDrawingHandler struct {
@@ -233,6 +236,15 @@ func (h *ResearchDrawingHandler) submitToPaperBanana(c *gin.Context, user *servi
 		"main_model_name":         req.MainModelName,
 		"image_gen_model_name":    req.ImageGenModelName,
 	}
+	if req.isGPTImage2() {
+		apiKey, baseURL := h.researchDrawingGPTImageConfig(c.Request.Context())
+		if apiKey != "" {
+			payload["gpt_image_api_key"] = apiKey
+		}
+		if baseURL != "" {
+			payload["gpt_image_base_url"] = baseURL
+		}
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -389,9 +401,20 @@ func (r *ResearchDrawingGenerateRequest) normalize() {
 		r.ImageGenModelName = r.ImageGenModelName[:200]
 	}
 	switch r.ImageGenModelName {
-	case researchDrawingDefaultImageModelName, researchDrawingGPTImage2ModelName:
+	case researchDrawingDefaultImageModelName:
+	case researchDrawingGPTImage2ModelName, researchDrawingGPT55Image2AliasName, researchDrawingLegacyGPTImage2Name:
+		r.ImageGenModelName = researchDrawingGPTImage2ModelName
 	default:
 		r.ImageGenModelName = researchDrawingDefaultImageModelName
+	}
+}
+
+func (r ResearchDrawingGenerateRequest) isGPTImage2() bool {
+	switch strings.TrimSpace(r.ImageGenModelName) {
+	case researchDrawingGPTImage2ModelName, researchDrawingGPT55Image2AliasName, researchDrawingLegacyGPTImage2Name:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -427,6 +450,25 @@ func (h *ResearchDrawingHandler) researchDrawingMethodOptimizationEnabled(ctx co
 		return true
 	}
 	return settings.ResearchDrawingMethodOptimizationEnabled
+}
+
+func (h *ResearchDrawingHandler) researchDrawingGPTImageConfig(ctx context.Context) (string, string) {
+	apiKey := strings.TrimSpace(os.Getenv("GPT_IMAGE_API_KEY"))
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("GPT_IMAGE_BASE_URL")), "/")
+	if h.settingService != nil {
+		if settings, err := h.settingService.GetAllSettings(ctx); err == nil && settings != nil {
+			if v := strings.TrimSpace(settings.ResearchDrawingGPTImageAPIKey); v != "" {
+				apiKey = v
+			}
+			if v := strings.TrimRight(strings.TrimSpace(settings.ResearchDrawingGPTImageBaseURL), "/"); v != "" {
+				baseURL = v
+			}
+		}
+	}
+	if baseURL == "" {
+		baseURL = researchDrawingDefaultGPTImageBaseURL
+	}
+	return apiKey, baseURL
 }
 
 func isLocalRunMode() bool {

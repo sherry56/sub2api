@@ -222,6 +222,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		ResearchDrawingMaxCriticRounds:                  settings.ResearchDrawingMaxCriticRounds,
 		ResearchDrawingMainModelName:                    settings.ResearchDrawingMainModelName,
 		ResearchDrawingImageGenModelName:                settings.ResearchDrawingImageGenModelName,
+		ResearchDrawingGPTImageAPIKeyConfigured:         settings.ResearchDrawingGPTImageAPIKeyConfigured,
+		ResearchDrawingGPTImageBaseURL:                  settings.ResearchDrawingGPTImageBaseURL,
 		ResearchDrawingMaxRefineResolution:              settings.ResearchDrawingMaxRefineResolution,
 		ResearchDrawingUnitPrice:                        settings.ResearchDrawingUnitPrice,
 		ResearchDrawingMethodOptimizationEnabled:        settings.ResearchDrawingMethodOptimizationEnabled,
@@ -465,6 +467,8 @@ type UpdateSettingsRequest struct {
 	ResearchDrawingMaxCriticRounds                  int      `json:"research_drawing_max_critic_rounds"`
 	ResearchDrawingMainModelName                    string   `json:"research_drawing_main_model_name"`
 	ResearchDrawingImageGenModelName                string   `json:"research_drawing_image_gen_model_name"`
+	ResearchDrawingGPTImageAPIKey                   string   `json:"research_drawing_gpt_image_api_key"`
+	ResearchDrawingGPTImageBaseURL                  string   `json:"research_drawing_gpt_image_base_url"`
 	ResearchDrawingMaxRefineResolution              string   `json:"research_drawing_max_refine_resolution"`
 	ResearchDrawingUnitPrice                        *float64 `json:"research_drawing_unit_price"`
 	ResearchDrawingMethodOptimizationEnabled        *bool    `json:"research_drawing_method_optimization_enabled"`
@@ -1131,7 +1135,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		researchDrawingDefaultMainModelName       = "openrouter/google/gemini-3-flash-preview"
 		researchDrawingDefaultImageGenModelName   = "openrouter/google/gemini-3.1-flash-image-preview"
 		researchDrawingGPT55ModelName             = "openrouter/openai/gpt-5.5"
-		researchDrawingGPTImage2ModelName         = "openrouter/openai/gpt-5.4-image-2"
+		researchDrawingGPTImage2ModelName         = "gpt-image-2"
+		researchDrawingGPT55Image2AliasModelName  = "gpt-5.5-image2"
+		researchDrawingLegacyGPTImage2ModelName   = "openrouter/openai/gpt-5.4-image-2"
+		researchDrawingDefaultGPTImageBaseURL     = "https://api.openai.com/v1"
 		researchDrawingModelNameMaxLen            = 200
 	)
 	req.ResearchDrawingExpMode = strings.TrimSpace(req.ResearchDrawingExpMode)
@@ -1204,9 +1211,20 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		req.ResearchDrawingImageGenModelName = req.ResearchDrawingImageGenModelName[:researchDrawingModelNameMaxLen]
 	}
 	switch req.ResearchDrawingImageGenModelName {
-	case researchDrawingDefaultImageGenModelName, researchDrawingGPTImage2ModelName:
+	case researchDrawingDefaultImageGenModelName:
+	case researchDrawingGPTImage2ModelName, researchDrawingGPT55Image2AliasModelName, researchDrawingLegacyGPTImage2ModelName:
+		req.ResearchDrawingImageGenModelName = researchDrawingGPTImage2ModelName
 	default:
 		req.ResearchDrawingImageGenModelName = researchDrawingDefaultImageGenModelName
+	}
+	req.ResearchDrawingGPTImageAPIKey = strings.TrimSpace(req.ResearchDrawingGPTImageAPIKey)
+	req.ResearchDrawingGPTImageBaseURL = strings.TrimRight(strings.TrimSpace(req.ResearchDrawingGPTImageBaseURL), "/")
+	if req.ResearchDrawingGPTImageBaseURL == "" {
+		if strings.TrimSpace(previousSettings.ResearchDrawingGPTImageBaseURL) != "" {
+			req.ResearchDrawingGPTImageBaseURL = strings.TrimRight(strings.TrimSpace(previousSettings.ResearchDrawingGPTImageBaseURL), "/")
+		} else {
+			req.ResearchDrawingGPTImageBaseURL = researchDrawingDefaultGPTImageBaseURL
+		}
 	}
 	req.ResearchDrawingMaxRefineResolution = strings.ToUpper(strings.TrimSpace(req.ResearchDrawingMaxRefineResolution))
 	if req.ResearchDrawingMaxRefineResolution != "2K" && req.ResearchDrawingMaxRefineResolution != "4K" {
@@ -1441,6 +1459,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ResearchDrawingMaxCriticRounds:                  req.ResearchDrawingMaxCriticRounds,
 		ResearchDrawingMainModelName:                    req.ResearchDrawingMainModelName,
 		ResearchDrawingImageGenModelName:                req.ResearchDrawingImageGenModelName,
+		ResearchDrawingGPTImageAPIKey:                   req.ResearchDrawingGPTImageAPIKey,
+		ResearchDrawingGPTImageBaseURL:                  req.ResearchDrawingGPTImageBaseURL,
 		ResearchDrawingMaxRefineResolution:              req.ResearchDrawingMaxRefineResolution,
 		ResearchDrawingUnitPrice:                        researchDrawingUnitPrice,
 		ResearchDrawingMethodOptimizationEnabled:        researchDrawingMethodOptimizationEnabled,
@@ -1723,6 +1743,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ResearchDrawingMaxCriticRounds:                  updatedSettings.ResearchDrawingMaxCriticRounds,
 		ResearchDrawingMainModelName:                    updatedSettings.ResearchDrawingMainModelName,
 		ResearchDrawingImageGenModelName:                updatedSettings.ResearchDrawingImageGenModelName,
+		ResearchDrawingGPTImageAPIKeyConfigured:         updatedSettings.ResearchDrawingGPTImageAPIKeyConfigured,
+		ResearchDrawingGPTImageBaseURL:                  updatedSettings.ResearchDrawingGPTImageBaseURL,
 		ResearchDrawingMaxRefineResolution:              updatedSettings.ResearchDrawingMaxRefineResolution,
 		ResearchDrawingUnitPrice:                        updatedSettings.ResearchDrawingUnitPrice,
 		ResearchDrawingMethodOptimizationEnabled:        updatedSettings.ResearchDrawingMethodOptimizationEnabled,

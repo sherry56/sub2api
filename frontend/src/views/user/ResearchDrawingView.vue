@@ -210,7 +210,6 @@
           <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm text-gray-600 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-300">
             <span>{{ t('researchDrawing.run.estimatedTime') }}：</span>
             <b class="text-gray-900 dark:text-white">{{ t('researchDrawing.run.noHistory') }}</b>
-            <span class="text-gray-500 dark:text-dark-400">（{{ t('researchDrawing.run.noHistoryHint') }}）</span>
           </div>
 
           <div class="flex flex-wrap gap-3">
@@ -537,7 +536,7 @@ const DEFAULT_EXAMPLE_METHOD = `## 方法：PaperVizAgent 框架
 const DEFAULT_EXAMPLE_CAPTION =
   '图 1：PaperVizAgent 框架概览。给定源文本上下文和表达意图后，系统首先检索相关参考示例，并合成经过风格优化的描述。随后通过可视化与评审循环进行多轮细化，最终生成学术图。'
 
-const GPT_IMAGE_2_MODEL = 'openrouter/openai/gpt-5.4-image-2'
+const GPT_IMAGE_2_MODEL = 'gpt-image-2'
 const GPT_5_5_MODEL = 'openrouter/openai/gpt-5.5'
 
 const mainModelOptions = [
@@ -558,9 +557,8 @@ const imageModelOptions = [
     label: 'Gemini 3.1 Flash Image Preview',
     value: 'openrouter/google/gemini-3.1-flash-image-preview',
   },
-  // TODO(research-drawing): wire this through PaperBanana after upstream support is confirmed.
   {
-    label: 'GPT Image 2',
+    label: 'GPT-5.5-Image-2',
     value: GPT_IMAGE_2_MODEL,
   },
 ]

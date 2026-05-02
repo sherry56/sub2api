@@ -1299,6 +1299,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyResearchDrawingMaxCriticRounds] = strconv.Itoa(settings.ResearchDrawingMaxCriticRounds)
 	updates[SettingKeyResearchDrawingMainModelName] = settings.ResearchDrawingMainModelName
 	updates[SettingKeyResearchDrawingImageGenModelName] = settings.ResearchDrawingImageGenModelName
+	if strings.TrimSpace(settings.ResearchDrawingGPTImageAPIKey) != "" {
+		updates[SettingKeyResearchDrawingGPTImageAPIKey] = strings.TrimSpace(settings.ResearchDrawingGPTImageAPIKey)
+	}
+	updates[SettingKeyResearchDrawingGPTImageBaseURL] = strings.TrimSpace(settings.ResearchDrawingGPTImageBaseURL)
 	updates[SettingKeyResearchDrawingMaxRefineResolution] = settings.ResearchDrawingMaxRefineResolution
 	updates[SettingKeyResearchDrawingUnitPrice] = strconv.FormatFloat(settings.ResearchDrawingUnitPrice, 'f', 8, 64)
 	updates[SettingKeyResearchDrawingMethodOptimizationEnabled] = strconv.FormatBool(settings.ResearchDrawingMethodOptimizationEnabled)
@@ -1976,6 +1980,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyResearchDrawingMaxCriticRounds:                  strconv.Itoa(researchDrawingDefaultMaxCriticRounds),
 		SettingKeyResearchDrawingMainModelName:                    researchDrawingDefaultMainModelName,
 		SettingKeyResearchDrawingImageGenModelName:                researchDrawingDefaultImageGenModelName,
+		SettingKeyResearchDrawingGPTImageAPIKey:                   "",
+		SettingKeyResearchDrawingGPTImageBaseURL:                  researchDrawingDefaultGPTImageBaseURL,
 		SettingKeyResearchDrawingMaxRefineResolution:              researchDrawingDefaultMaxRefineResolution,
 		SettingKeyResearchDrawingUnitPrice:                        strconv.FormatFloat(researchDrawingDefaultUnitPrice, 'f', 2, 64),
 		SettingKeyResearchDrawingMethodOptimizationEnabled:        "true",
@@ -2366,6 +2372,12 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		settings[SettingKeyResearchDrawingImageGenModelName],
 		researchDrawingDefaultImageGenModelName,
 	)
+	result.ResearchDrawingGPTImageAPIKey = strings.TrimSpace(settings[SettingKeyResearchDrawingGPTImageAPIKey])
+	result.ResearchDrawingGPTImageAPIKeyConfigured = result.ResearchDrawingGPTImageAPIKey != ""
+	result.ResearchDrawingGPTImageBaseURL = normalizeResearchDrawingBaseURL(
+		settings[SettingKeyResearchDrawingGPTImageBaseURL],
+		researchDrawingDefaultGPTImageBaseURL,
+	)
 	result.ResearchDrawingMaxRefineResolution = normalizeResearchDrawingMaxRefineResolution(
 		settings[SettingKeyResearchDrawingMaxRefineResolution],
 	)
@@ -2409,6 +2421,10 @@ const (
 	researchDrawingDefaultMaxCriticRounds     = 2
 	researchDrawingDefaultMainModelName       = "openrouter/google/gemini-3-flash-preview"
 	researchDrawingDefaultImageGenModelName   = "openrouter/google/gemini-3.1-flash-image-preview"
+	researchDrawingGPTImage2ModelName         = "gpt-image-2"
+	researchDrawingGPT55Image2AliasModelName  = "gpt-5.5-image2"
+	researchDrawingLegacyGPTImage2ModelName   = "openrouter/openai/gpt-5.4-image-2"
+	researchDrawingDefaultGPTImageBaseURL     = "https://api.openai.com/v1"
 	researchDrawingDefaultMaxRefineResolution = "2K"
 	researchDrawingDefaultUnitPrice           = 2.99
 	researchDrawingNumCandidatesMin           = 1
@@ -2507,11 +2523,21 @@ func normalizeResearchDrawingMainModelName(raw, fallback string) string {
 func normalizeResearchDrawingImageModelName(raw, fallback string) string {
 	trimmed := normalizeResearchDrawingModelName(raw, fallback)
 	switch trimmed {
-	case "openrouter/google/gemini-3.1-flash-image-preview", "openrouter/openai/gpt-5.4-image-2":
+	case "openrouter/google/gemini-3.1-flash-image-preview":
 		return trimmed
+	case researchDrawingGPTImage2ModelName, researchDrawingGPT55Image2AliasModelName, researchDrawingLegacyGPTImage2ModelName:
+		return researchDrawingGPTImage2ModelName
 	default:
 		return fallback
 	}
+}
+
+func normalizeResearchDrawingBaseURL(raw, fallback string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return fallback
+	}
+	return strings.TrimRight(trimmed, "/")
 }
 
 func clampAffiliateRebateRate(value float64) float64 {

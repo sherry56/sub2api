@@ -157,6 +157,8 @@ type SystemSettings struct {
 	ResearchDrawingMaxCriticRounds                  int     `json:"research_drawing_max_critic_rounds"`
 	ResearchDrawingMainModelName                    string  `json:"research_drawing_main_model_name"`
 	ResearchDrawingImageGenModelName                string  `json:"research_drawing_image_gen_model_name"`
+	ResearchDrawingGPTImageAPIKeyConfigured         bool    `json:"research_drawing_gpt_image_api_key_configured"`
+	ResearchDrawingGPTImageBaseURL                  string  `json:"research_drawing_gpt_image_base_url"`
 	ResearchDrawingMaxRefineResolution              string  `json:"research_drawing_max_refine_resolution"`
 	ResearchDrawingUnitPrice                        float64 `json:"research_drawing_unit_price"`
 	ResearchDrawingMethodOptimizationEnabled        bool    `json:"research_drawing_method_optimization_enabled"`
