@@ -60,7 +60,7 @@
         </div>
       </section>
 
-      <section class="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+      <section class="space-y-4">
         <form class="card space-y-5 p-6" @submit.prevent="startGenerationPreview">
           <div class="border-b border-gray-100 pb-4 dark:border-dark-700">
             <h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.input.title') }}</h4>
@@ -95,7 +95,7 @@
             ></textarea>
           </label>
 
-          <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900">
+          <div v-if="isCustomGenerationMode" class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900">
             <label class="flex items-start gap-3 text-sm text-gray-700 dark:text-dark-300">
               <input
                 v-model="generationInput.optimizeMethodContent"
@@ -124,7 +124,7 @@
             <label class="field-wrap">
               <span>{{ t('researchDrawing.input.generationMode') }}</span>
               <select v-model="generationInput.generationMode" class="input">
-                <option value="budget">{{ t('researchDrawing.input.defaultMode') }}</option>
+                <option value="default">{{ t('researchDrawing.input.defaultMode') }}</option>
                 <option value="custom">{{ t('researchDrawing.input.customMode') }}</option>
               </select>
             </label>
@@ -136,7 +136,7 @@
               {{ t('researchDrawing.input.customModeHint') }}
             </p>
 
-            <div class="space-y-4">
+            <div v-if="isCustomGenerationMode" class="space-y-4">
               <div class="grid gap-4 md:grid-cols-3">
                 <label class="field-wrap">
                   <span>{{ t('researchDrawing.labels.expMode') }}</span>
@@ -260,22 +260,28 @@
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ unitPriceText }}</dd>
             </div>
             <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
+              <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.input.generationMode') }}</dt>
+              <dd class="mt-1 font-semibold text-gray-900 dark:text-white">
+                {{ isCustomGenerationMode ? t('researchDrawing.input.customMode') : t('researchDrawing.input.defaultMode') }}
+              </dd>
+            </div>
+            <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
               <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.run.quotaNeed') }}</dt>
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ quotaNeed }}</dd>
             </div>
-            <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
+            <div v-if="isCustomGenerationMode" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
               <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.labels.aspectRatio') }}</dt>
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ form.research_drawing_aspect_ratio }}</dd>
             </div>
-            <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
+            <div v-if="isCustomGenerationMode" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
               <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.labels.numCandidates') }}</dt>
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ form.research_drawing_num_candidates }}</dd>
             </div>
-            <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
+            <div v-if="isCustomGenerationMode" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
               <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.labels.maxCriticRounds') }}</dt>
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ form.research_drawing_max_critic_rounds }}</dd>
             </div>
-            <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
+            <div v-if="isCustomGenerationMode" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
               <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.labels.maxRefineResolution') }}</dt>
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ form.research_drawing_max_refine_resolution }}</dd>
             </div>
@@ -313,12 +319,11 @@
             {{ runPreviewStarted ? t('researchDrawing.run.previewStatus') : t('researchDrawing.run.idleStatus') }}
           </p>
         </aside>
-      </section>
 
-      <section class="card space-y-4 p-4 sm:p-5">
-        <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-          {{ t('researchDrawing.run.saveHint') }}
-        </div>
+        <section class="card space-y-4 p-4 sm:p-5">
+          <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+            {{ t('researchDrawing.run.saveHint') }}
+          </div>
 
         <div
           v-if="selectedPreviewImage"
@@ -414,6 +419,7 @@
             </article>
           </div>
         </div>
+        </section>
       </section>
 
       <div v-if="loading" class="card flex items-center justify-center py-16">
@@ -561,7 +567,7 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { SystemSettings, UpdateSettingsRequest } from '@/api/admin/settings'
 import { researchDrawingAPI } from '@/api/researchDrawing'
-import type { ResearchDrawingJobStatus } from '@/api/researchDrawing'
+import type { ResearchDrawingGenerateRequest, ResearchDrawingJobStatus } from '@/api/researchDrawing'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -667,7 +673,7 @@ const PAPERBANANA_INPUT_DEFAULTS: PaperBananaGenerationInput = {
   methodContent: '',
   optimizeMethodContent: false,
   caption: '',
-  generationMode: 'budget',
+  generationMode: 'default',
 }
 
 const { t } = useI18n()
@@ -708,6 +714,8 @@ const imageModelOptions = computed(() => {
 const generationInput = reactive<PaperBananaGenerationInput>({
   ...PAPERBANANA_INPUT_DEFAULTS,
 })
+
+const isCustomGenerationMode = computed(() => generationInput.generationMode === 'custom')
 
 const methodOptimizationEnabled = computed(
   () => appStore.cachedPublicSettings?.research_drawing_method_optimization_enabled !== false,
@@ -915,20 +923,25 @@ async function startGenerationPreview() {
   runResultImages.value = []
   stopRunPolling()
   try {
-    const result = await researchDrawingAPI.generate({
+    const payload: ResearchDrawingGenerateRequest = {
       method_content: generationInput.methodContent,
       caption: generationInput.caption,
-      optimize_method_content: generationInput.optimizeMethodContent,
       generation_mode: generationInput.generationMode,
-      exp_mode: form.research_drawing_exp_mode,
-      retrieval_setting: form.research_drawing_retrieval_setting,
-      num_candidates: form.research_drawing_num_candidates,
-      aspect_ratio: form.research_drawing_aspect_ratio,
-      max_critic_rounds: form.research_drawing_max_critic_rounds,
-      max_refine_resolution: form.research_drawing_max_refine_resolution,
-      main_model_name: form.research_drawing_main_model_name,
-      image_gen_model_name: form.research_drawing_image_gen_model_name,
-    })
+      optimize_method_content: isCustomGenerationMode.value ? generationInput.optimizeMethodContent : false,
+      ...(isCustomGenerationMode.value
+        ? {
+            exp_mode: form.research_drawing_exp_mode,
+            retrieval_setting: form.research_drawing_retrieval_setting,
+            num_candidates: form.research_drawing_num_candidates,
+            aspect_ratio: form.research_drawing_aspect_ratio,
+            max_critic_rounds: form.research_drawing_max_critic_rounds,
+            max_refine_resolution: form.research_drawing_max_refine_resolution,
+            main_model_name: form.research_drawing_main_model_name,
+            image_gen_model_name: form.research_drawing_image_gen_model_name,
+          }
+        : {}),
+    }
+    const result = await researchDrawingAPI.generate(payload)
     runJobId.value = result.job_id
     runPaperBananaUser.value = result.paperbanana_user || ''
     appStore.showInfo(

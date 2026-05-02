@@ -93,7 +93,7 @@
             ></textarea>
           </label>
 
-          <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900">
+          <div v-if="isCustomGenerationMode" class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900">
             <label class="flex items-start gap-3 text-sm text-gray-700 dark:text-dark-300">
               <input
                 v-model="generationInput.optimizeMethodContent"
@@ -121,7 +121,7 @@
             <label class="field-wrap">
               <span>{{ t('researchDrawing.input.generationMode') }}</span>
               <select v-model="generationInput.generationMode" class="input">
-                <option value="budget">{{ t('researchDrawing.input.defaultMode') }}</option>
+                <option value="default">{{ t('researchDrawing.input.defaultMode') }}</option>
                 <option value="custom">{{ t('researchDrawing.input.customMode') }}</option>
               </select>
             </label>
@@ -249,18 +249,24 @@
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ quotaNeed }}</dd>
             </div>
             <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
+              <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.input.generationMode') }}</dt>
+              <dd class="mt-1 font-semibold text-gray-900 dark:text-white">
+                {{ isCustomGenerationMode ? t('researchDrawing.input.customMode') : t('researchDrawing.input.defaultMode') }}
+              </dd>
+            </div>
+            <div v-if="isCustomGenerationMode" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
               <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.labels.aspectRatio') }}</dt>
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ form.research_drawing_aspect_ratio }}</dd>
             </div>
-            <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
+            <div v-if="isCustomGenerationMode" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
               <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.labels.numCandidates') }}</dt>
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ form.research_drawing_num_candidates }}</dd>
             </div>
-            <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
+            <div v-if="isCustomGenerationMode" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
               <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.labels.maxCriticRounds') }}</dt>
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ form.research_drawing_max_critic_rounds }}</dd>
             </div>
-            <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
+            <div v-if="isCustomGenerationMode" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
               <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.labels.maxRefineResolution') }}</dt>
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ form.research_drawing_max_refine_resolution }}</dd>
             </div>
@@ -474,7 +480,7 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { SystemSettings, UpdateSettingsRequest } from '@/api/admin/settings'
 import { researchDrawingAPI } from '@/api/researchDrawing'
-import type { ResearchDrawingJobStatus } from '@/api/researchDrawing'
+import type { ResearchDrawingGenerateRequest, ResearchDrawingJobStatus } from '@/api/researchDrawing'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -581,7 +587,7 @@ const PAPERBANANA_INPUT_DEFAULTS: PaperBananaGenerationInput = {
   methodContent: '',
   optimizeMethodContent: false,
   caption: '',
-  generationMode: 'budget',
+  generationMode: 'default',
 }
 
 const { t } = useI18n()
@@ -609,6 +615,8 @@ const form = reactive<ResearchDrawingForm>({
 const generationInput = reactive<PaperBananaGenerationInput>({
   ...PAPERBANANA_INPUT_DEFAULTS,
 })
+
+const isCustomGenerationMode = computed(() => generationInput.generationMode === 'custom')
 
 const methodOptimizationEnabled = computed(() => form.research_drawing_method_optimization_enabled !== false)
 
@@ -770,19 +778,24 @@ async function startGenerationPreview() {
   revokeRunImages()
   stopRunPolling()
   try {
-    const result = await researchDrawingAPI.generate({
+    const payload: ResearchDrawingGenerateRequest = {
       method_content: generationInput.methodContent,
       caption: generationInput.caption,
-      optimize_method_content: generationInput.optimizeMethodContent,
+      optimize_method_content: isCustomGenerationMode.value ? generationInput.optimizeMethodContent : false,
       generation_mode: generationInput.generationMode,
-      exp_mode: form.research_drawing_exp_mode,
-      retrieval_setting: form.research_drawing_retrieval_setting,
-      num_candidates: form.research_drawing_num_candidates,
-      aspect_ratio: form.research_drawing_aspect_ratio,
-      max_critic_rounds: form.research_drawing_max_critic_rounds,
-      main_model_name: form.research_drawing_main_model_name,
-      image_gen_model_name: form.research_drawing_image_gen_model_name,
-    })
+      ...(isCustomGenerationMode.value
+        ? {
+            exp_mode: form.research_drawing_exp_mode,
+            retrieval_setting: form.research_drawing_retrieval_setting,
+            num_candidates: form.research_drawing_num_candidates,
+            aspect_ratio: form.research_drawing_aspect_ratio,
+            max_critic_rounds: form.research_drawing_max_critic_rounds,
+            main_model_name: form.research_drawing_main_model_name,
+            image_gen_model_name: form.research_drawing_image_gen_model_name,
+          }
+        : {}),
+    }
+    const result = await researchDrawingAPI.generate(payload)
     runJobId.value = result.job_id
     runPaperBananaUser.value = result.paperbanana_user || ''
     appStore.showInfo(t('researchDrawing.run.submittedWithCharge', { charge: result.charge }))
