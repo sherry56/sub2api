@@ -60,8 +60,8 @@
         </div>
       </section>
 
-      <section class="grid grid-cols-1 gap-6 lg:grid-cols-10 lg:items-start">
-        <form class="card self-start space-y-5 p-6 lg:col-span-6" @submit.prevent="startGenerationPreview">
+      <section class="grid grid-cols-1 gap-6 lg:grid-cols-10 lg:items-stretch">
+        <form class="card flex h-full flex-col gap-5 p-6 lg:col-span-6" @submit.prevent="startGenerationPreview">
           <div class="border-b border-gray-100 pb-4 dark:border-dark-700">
             <h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.input.title') }}</h4>
             <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('researchDrawing.input.desc') }}</p>
@@ -94,21 +94,6 @@
               :placeholder="t('researchDrawing.input.placeholders.methodContent')"
             ></textarea>
           </label>
-
-          <div v-if="showPaperBananaParameters" class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900">
-            <label class="flex items-start gap-3 text-sm text-gray-700 dark:text-dark-300">
-              <input
-                v-model="generationInput.optimizeMethodContent"
-                class="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                type="checkbox"
-                :disabled="!methodOptimizationEnabled"
-              />
-              <span>{{ t('researchDrawing.input.methodOptimize') }}</span>
-            </label>
-            <p v-if="!methodOptimizationEnabled" class="mt-2 text-sm text-gray-500 dark:text-dark-400">
-              {{ t('researchDrawing.input.optimizeUnavailable') }}
-            </p>
-          </div>
 
           <label class="field-wrap">
             <span>{{ t('researchDrawing.input.caption') }}</span>
@@ -248,7 +233,7 @@
           </p>
         </form>
 
-        <aside class="card self-start space-y-5 p-6 lg:col-span-4">
+        <aside class="card flex h-full flex-col gap-5 p-6 lg:col-span-4">
           <div class="border-b border-gray-100 pb-4 dark:border-dark-700">
             <h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.run.progressTitle') }}</h4>
             <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('researchDrawing.run.progressDesc') }}</p>
@@ -637,7 +622,6 @@ type PaperBananaGenerationInput = {
   methodExample: string
   captionExample: string
   methodContent: string
-  optimizeMethodContent: boolean
   caption: string
   generationMode: string
 }
@@ -718,7 +702,6 @@ const PAPERBANANA_INPUT_DEFAULTS: PaperBananaGenerationInput = {
   methodExample: '',
   captionExample: '',
   methodContent: '',
-  optimizeMethodContent: false,
   caption: '',
   generationMode: 'default',
 }
@@ -770,13 +753,6 @@ const isDirectGPTMode = computed(
 )
 const isCustomGenerationMode = computed(() => generationInput.generationMode === 'custom' && !isDirectGPTMode.value)
 const showPaperBananaParameters = computed(() => isCustomGenerationMode.value)
-
-const methodOptimizationEnabled = computed(
-  () => appStore.cachedPublicSettings?.research_drawing_method_optimization_enabled !== false,
-)
-const methodOptimizationDefaultEnabled = computed(
-  () => appStore.cachedPublicSettings?.research_drawing_method_optimization_default_enabled === true,
-)
 
 const quotaNeed = computed(() => {
   if (isDirectGPTMode.value) {
@@ -953,7 +929,6 @@ function resetToDefaults() {
 
 function resetGenerationInput() {
   Object.assign(generationInput, PAPERBANANA_INPUT_DEFAULTS)
-  applyMethodOptimizationDefault()
   runPreviewStarted.value = false
   runJobId.value = ''
   runPaperBananaUser.value = ''
@@ -970,9 +945,6 @@ async function startGenerationPreview() {
     appStore.showWarning(t('researchDrawing.input.validationRequired'))
     return
   }
-  if (isDirectGPTMode.value || !methodOptimizationEnabled.value) {
-    generationInput.optimizeMethodContent = false
-  }
 
   runSubmitting.value = true
   runPreviewStarted.value = true
@@ -985,7 +957,7 @@ async function startGenerationPreview() {
       method_content: generationInput.methodContent,
       caption: generationInput.caption,
       generation_mode: isDirectGPTMode.value ? 'default' : generationInput.generationMode,
-      optimize_method_content: isCustomGenerationMode.value && !isDirectGPTMode.value ? generationInput.optimizeMethodContent : false,
+      optimize_method_content: false,
       main_model_name: form.research_drawing_main_model_name,
       image_gen_model_name: form.research_drawing_image_gen_model_name,
       ...(isCustomGenerationMode.value && !isDirectGPTMode.value
@@ -1002,11 +974,7 @@ async function startGenerationPreview() {
     const result = await researchDrawingAPI.generate(payload)
     runJobId.value = result.job_id
     runPaperBananaUser.value = result.paperbanana_user || ''
-    appStore.showInfo(
-      isAdmin.value
-        ? t('researchDrawing.run.submittedWithCharge', { charge: result.charge })
-        : t('researchDrawing.run.previewStatus'),
-    )
+    appStore.showInfo(t('researchDrawing.run.previewStatus'))
     startRunPolling()
   } catch (error) {
     runPreviewStarted.value = false
@@ -1162,11 +1130,6 @@ function formatDuration(seconds: number) {
   const min = Math.floor(sec / 60)
   const rest = sec % 60
   return min > 0 ? `${min} 分 ${rest} 秒` : `${rest} 秒`
-}
-
-function applyMethodOptimizationDefault() {
-  generationInput.optimizeMethodContent =
-    methodOptimizationEnabled.value && methodOptimizationDefaultEnabled.value
 }
 
 async function loadSettings() {
