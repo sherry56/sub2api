@@ -3,12 +3,17 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -29,8 +34,6 @@ const (
 	researchDrawingGPTImage2ModelName    = "gpt-image-2"
 )
 
-const researchDrawingDefaultGPTImageBaseURL = "https://api.openai.com/v1"
-
 type ResearchDrawingHandler struct {
 	userService    *service.UserService
 	settingService *service.SettingService
@@ -47,6 +50,26 @@ type researchDrawingJobCharge struct {
 	Charge          float64
 	Refunded        bool
 	PaperBananaUser string
+	Direct          bool
+	Status          string
+	Error           string
+	StartedAt       time.Time
+	FinishedAt      time.Time
+	ImagePrompt     string
+	Images          map[int]researchDrawingDirectImage
+}
+
+type researchDrawingDirectImage struct {
+	ContentType string
+	Bytes       []byte
+	Path        string
+}
+
+type researchDrawingDirectGPTConfig struct {
+	TextAPIKey   string
+	TextBaseURL  string
+	ImageAPIKey  string
+	ImageBaseURL string
 }
 
 type ResearchDrawingGenerateRequest struct {
@@ -67,6 +90,7 @@ type ResearchDrawingGenerateRequest struct {
 type researchDrawingGenerateResponse struct {
 	JobID           string  `json:"job_id"`
 	Status          string  `json:"status"`
+	Mode            string  `json:"mode,omitempty"`
 	PaperBananaURL  string  `json:"paperbanana_url,omitempty"`
 	PaperBananaUser string  `json:"paperbanana_user,omitempty"`
 	Charge          float64 `json:"charge"`
@@ -77,7 +101,7 @@ func NewResearchDrawingHandler(userService *service.UserService, settingService 
 	return &ResearchDrawingHandler{
 		userService:    userService,
 		settingService: settingService,
-		httpClient:     &http.Client{Timeout: 20 * time.Second},
+		httpClient:     &http.Client{Timeout: 180 * time.Second},
 		jobs:           make(map[string]researchDrawingJobCharge),
 	}
 }
@@ -99,6 +123,10 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 		response.BadRequest(c, "method_content is required")
 		return
 	}
+	directMode := req.isDirectGPTMode()
+	if directMode {
+		req.forceDirectGPTMode()
+	}
 
 	user, err := h.userService.GetProfile(c.Request.Context(), subject.UserID)
 	if err != nil {
@@ -111,6 +139,16 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 		return
 	}
 
+	var directCfg researchDrawingDirectGPTConfig
+	if directMode {
+		var cfgErr error
+		directCfg, cfgErr = h.researchDrawingDirectGPTConfig(req)
+		if cfgErr != nil {
+			response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "RESEARCH_DRAWING_GPT_CONFIG_INVALID", cfgErr.Error()))
+			return
+		}
+	}
+
 	charge := h.researchDrawingUnitPrice(c.Request.Context())
 	if user.Balance < charge {
 		response.ErrorFrom(c, infraerrors.New(http.StatusPaymentRequired, "INSUFFICIENT_BALANCE", "insufficient balance"))
@@ -119,6 +157,32 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 
 	if err := h.userService.UpdateBalance(c.Request.Context(), subject.UserID, -charge); err != nil {
 		response.ErrorFrom(c, err)
+		return
+	}
+
+	if directMode {
+		jobID := newResearchDrawingJobID()
+		h.mu.Lock()
+		h.jobs[jobID] = researchDrawingJobCharge{
+			UserID:          subject.UserID,
+			Charge:          charge,
+			PaperBananaUser: paperBananaUsername(user),
+			Direct:          true,
+			Status:          "running",
+			StartedAt:       time.Now(),
+			Images:          make(map[int]researchDrawingDirectImage),
+		}
+		h.mu.Unlock()
+
+		go h.runDirectGPTResearchDrawingJob(jobID, req, directCfg)
+
+		response.Accepted(c, researchDrawingGenerateResponse{
+			JobID:     jobID,
+			Status:    "running",
+			Mode:      "direct_gpt",
+			Charge:    charge,
+			QuotaNeed: req.directQuotaNeed(),
+		})
 		return
 	}
 
@@ -167,6 +231,18 @@ func (h *ResearchDrawingHandler) JobStatus(c *gin.Context) {
 		return
 	}
 
+	if status, handled, err := h.getDirectJobStatus(subject.UserID, jobID); handled {
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		if strings.EqualFold(stringFromMap(status, "status"), "error") {
+			h.refundJobOnce(c, subject.UserID, jobID)
+		}
+		response.Success(c, status)
+		return
+	}
+
 	status, err := h.getPaperBananaStatus(c, subject.UserID, jobID, pbUser)
 	if err != nil {
 		response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "PAPERBANANA_STATUS_FAILED", err.Error()))
@@ -190,6 +266,18 @@ func (h *ResearchDrawingHandler) JobImage(c *gin.Context) {
 	pbUser := strings.TrimSpace(c.Query("paperbanana_user"))
 	if jobID == "" || candidateID == "" {
 		response.BadRequest(c, "job_id and candidate_id are required")
+		return
+	}
+
+	if body, contentType, handled, err := h.getDirectJobImage(subject.UserID, jobID, candidateID); handled {
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		if contentType == "" {
+			contentType = "image/png"
+		}
+		c.Data(http.StatusOK, contentType, body)
 		return
 	}
 
@@ -234,15 +322,6 @@ func (h *ResearchDrawingHandler) submitToPaperBanana(c *gin.Context, user *servi
 		"max_refine_resolution":   req.MaxRefineResolution,
 		"main_model_name":         req.MainModelName,
 		"image_gen_model_name":    req.ImageGenModelName,
-	}
-	if req.isGPTImage2() {
-		apiKey, baseURL := h.researchDrawingGPTImageConfig(c.Request.Context())
-		if apiKey != "" {
-			payload["gpt_api_key"] = apiKey
-		}
-		if baseURL != "" {
-			payload["gpt_base_url"] = baseURL
-		}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -358,6 +437,266 @@ func (h *ResearchDrawingHandler) getPaperBananaStatus(c *gin.Context, userID int
 	return out, nil
 }
 
+func (h *ResearchDrawingHandler) runDirectGPTResearchDrawingJob(jobID string, req ResearchDrawingGenerateRequest, cfg researchDrawingDirectGPTConfig) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	imagePrompt := buildResearchDrawingDirectImagePrompt(req)
+	if req.isGPT55() {
+		generatedPrompt, err := h.createResearchDrawingDirectImagePrompt(ctx, req, cfg)
+		if err != nil {
+			h.failDirectJob(jobID, err)
+			return
+		}
+		if strings.TrimSpace(generatedPrompt) != "" {
+			imagePrompt = strings.TrimSpace(generatedPrompt)
+		}
+	}
+
+	imageBytes, err := h.generateResearchDrawingDirectImage(ctx, req, imagePrompt, cfg)
+	if err != nil {
+		h.failDirectJob(jobID, err)
+		return
+	}
+
+	outPath, err := saveResearchDrawingDirectCandidate(jobID, imageBytes)
+	if err != nil {
+		h.failDirectJob(jobID, fmt.Errorf("save candidate_0.png: %w", err))
+		return
+	}
+
+	h.mu.Lock()
+	job, ok := h.jobs[jobID]
+	if ok && job.Direct {
+		if job.Images == nil {
+			job.Images = make(map[int]researchDrawingDirectImage)
+		}
+		job.Status = "done"
+		job.Error = ""
+		job.FinishedAt = time.Now()
+		job.ImagePrompt = imagePrompt
+		job.Images[0] = researchDrawingDirectImage{
+			ContentType: "image/png",
+			Bytes:       imageBytes,
+			Path:        outPath,
+		}
+		h.jobs[jobID] = job
+	}
+	h.mu.Unlock()
+	log.Printf("[ResearchDrawing] direct GPT candidate image saved job_id=%s candidate_id=0 bytes=%d path=%s", jobID, len(imageBytes), outPath)
+}
+
+func (h *ResearchDrawingHandler) createResearchDrawingDirectImagePrompt(ctx context.Context, req ResearchDrawingGenerateRequest, cfg researchDrawingDirectGPTConfig) (string, error) {
+	endpoint := strings.TrimRight(cfg.TextBaseURL, "/") + "/chat/completions"
+	payload := map[string]any{
+		"model": researchDrawingGPT55ModelName,
+		"messages": []map[string]string{
+			{
+				"role": "system",
+				"content": strings.Join([]string{
+					"You convert scientific paper method text into a concise image generation prompt.",
+					"Return only the final prompt.",
+					"The prompt must describe a clean academic diagram on a white background, with legible labels and no figure title.",
+				}, " "),
+			},
+			{
+				"role":    "user",
+				"content": buildResearchDrawingPromptInput(req),
+			},
+		},
+		"temperature":           0.4,
+		"max_completion_tokens": 1200,
+	}
+	body, contentType, statusCode, err := h.postResearchDrawingGPTJSON(ctx, endpoint, cfg.TextAPIKey, payload)
+	if err != nil {
+		return "", err
+	}
+	if statusCode < 200 || statusCode >= 300 {
+		return "", fmt.Errorf("gpt-5.5 text request failed: status_code=%d content_type=%s response_preview=%s", statusCode, contentType, researchDrawingResponsePreview(body))
+	}
+
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", fmt.Errorf("parse gpt-5.5 text response: %w; response_preview=%s", err, researchDrawingResponsePreview(body))
+	}
+	if len(parsed.Choices) == 0 {
+		return "", fmt.Errorf("gpt-5.5 text response contained no choices")
+	}
+	prompt := strings.TrimSpace(parsed.Choices[0].Message.Content)
+	if prompt == "" {
+		return "", fmt.Errorf("gpt-5.5 text response contained empty content")
+	}
+	log.Printf("[ResearchDrawing] direct GPT text prompt generated model=%s request_url=%s prompt_len=%d", researchDrawingGPT55ModelName, endpoint, len(prompt))
+	return prompt, nil
+}
+
+func (h *ResearchDrawingHandler) generateResearchDrawingDirectImage(ctx context.Context, req ResearchDrawingGenerateRequest, imagePrompt string, cfg researchDrawingDirectGPTConfig) ([]byte, error) {
+	endpoint := strings.TrimRight(cfg.ImageBaseURL, "/") + "/images/generations"
+	payload := map[string]any{
+		"model":  researchDrawingGPTImage2ModelName,
+		"prompt": imagePrompt,
+		"size":   researchDrawingDirectImageSize(req.AspectRatio),
+	}
+	body, contentType, statusCode, err := h.postResearchDrawingGPTJSON(ctx, endpoint, cfg.ImageAPIKey, payload)
+	if err != nil {
+		return nil, err
+	}
+	if statusCode < 200 || statusCode >= 300 {
+		log.Printf("[ResearchDrawing] direct GPT image request failed url=%s status_code=%d content_type=%s response_preview=%s", endpoint, statusCode, contentType, researchDrawingResponsePreview(body))
+		return nil, fmt.Errorf("gpt-image-2 image request failed: status_code=%d content_type=%s response_preview=%s", statusCode, contentType, researchDrawingResponsePreview(body))
+	}
+	if strings.Contains(strings.ToLower(contentType), "text/html") {
+		return nil, fmt.Errorf("gpt-image-2 image request returned html: status_code=%d response_preview=%s", statusCode, researchDrawingResponsePreview(body))
+	}
+
+	var parsed struct {
+		Data []struct {
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("parse gpt-image-2 response: %w; response_preview=%s", err, researchDrawingResponsePreview(body))
+	}
+	if len(parsed.Data) == 0 || strings.TrimSpace(parsed.Data[0].B64JSON) == "" {
+		return nil, fmt.Errorf("gpt-image-2 response missing data[0].b64_json")
+	}
+	b64JSON := strings.TrimSpace(parsed.Data[0].B64JSON)
+	imageBytes, err := decodeResearchDrawingImageBase64(b64JSON)
+	if err != nil {
+		return nil, fmt.Errorf("decode data[0].b64_json: %w", err)
+	}
+	if len(imageBytes) == 0 {
+		return nil, fmt.Errorf("decode data[0].b64_json: empty image bytes")
+	}
+	log.Printf("[ResearchDrawing] direct GPT image parsed image_field=data[0].b64_json request_url=%s b64_len=%d decoded_bytes=%d", endpoint, len(b64JSON), len(imageBytes))
+	return imageBytes, nil
+}
+
+func (h *ResearchDrawingHandler) postResearchDrawingGPTJSON(ctx context.Context, endpoint, apiKey string, payload any) ([]byte, string, int, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, "", 0, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := h.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.Header.Get("Content-Type"), resp.StatusCode, err
+	}
+	return respBody, resp.Header.Get("Content-Type"), resp.StatusCode, nil
+}
+
+func (h *ResearchDrawingHandler) failDirectJob(jobID string, err error) {
+	message := "direct GPT generation failed"
+	if err != nil {
+		message = err.Error()
+	}
+	h.mu.Lock()
+	job, ok := h.jobs[jobID]
+	if ok && job.Direct {
+		job.Status = "error"
+		job.Error = message
+		job.FinishedAt = time.Now()
+		h.jobs[jobID] = job
+	}
+	h.mu.Unlock()
+	log.Printf("[ResearchDrawing] direct GPT generation failed job_id=%s error=%s", jobID, message)
+}
+
+func (h *ResearchDrawingHandler) getDirectJobStatus(userID int64, jobID string) (map[string]any, bool, error) {
+	h.mu.Lock()
+	job, ok := h.jobs[jobID]
+	if !ok || !job.Direct {
+		h.mu.Unlock()
+		return nil, false, nil
+	}
+	if job.UserID != userID {
+		h.mu.Unlock()
+		return nil, true, infraerrors.New(http.StatusNotFound, "RESEARCH_DRAWING_JOB_NOT_FOUND", "research drawing job not found")
+	}
+	status := strings.TrimSpace(job.Status)
+	if status == "" {
+		status = "running"
+	}
+	elapsed := 0
+	if !job.StartedAt.IsZero() {
+		elapsed = int(time.Since(job.StartedAt).Seconds())
+	}
+	candidateIDs := []int{}
+	images := []map[string]any{}
+	if status == "done" {
+		if _, ok := job.Images[0]; ok {
+			candidateIDs = append(candidateIDs, 0)
+			images = append(images, map[string]any{"candidate_id": 0})
+		}
+	}
+	out := map[string]any{
+		"ok":              true,
+		"job_id":          jobID,
+		"username":        job.PaperBananaUser,
+		"status":          status,
+		"mode":            "direct_gpt",
+		"elapsed_sec":     elapsed,
+		"candidate_count": len(candidateIDs),
+		"candidate_ids":   candidateIDs,
+		"images":          images,
+	}
+	if job.Error != "" {
+		out["error"] = job.Error
+	}
+	h.mu.Unlock()
+	return out, true, nil
+}
+
+func (h *ResearchDrawingHandler) getDirectJobImage(userID int64, jobID, candidateID string) ([]byte, string, bool, error) {
+	h.mu.Lock()
+	job, ok := h.jobs[jobID]
+	if !ok || !job.Direct {
+		h.mu.Unlock()
+		return nil, "", false, nil
+	}
+	if job.UserID != userID {
+		h.mu.Unlock()
+		return nil, "", true, infraerrors.New(http.StatusNotFound, "RESEARCH_DRAWING_JOB_NOT_FOUND", "research drawing job not found")
+	}
+	if candidateID != "0" {
+		h.mu.Unlock()
+		return nil, "", true, infraerrors.New(http.StatusNotFound, "RESEARCH_DRAWING_IMAGE_NOT_FOUND", "research drawing image not found")
+	}
+	if !strings.EqualFold(job.Status, "done") {
+		errMessage := job.Error
+		if errMessage == "" {
+			errMessage = "research drawing image is not ready"
+		}
+		h.mu.Unlock()
+		return nil, "", true, infraerrors.New(http.StatusConflict, "RESEARCH_DRAWING_IMAGE_NOT_READY", errMessage)
+	}
+	image, ok := job.Images[0]
+	if !ok || len(image.Bytes) == 0 {
+		h.mu.Unlock()
+		return nil, "", true, infraerrors.New(http.StatusNotFound, "RESEARCH_DRAWING_IMAGE_NOT_FOUND", "research drawing image not found")
+	}
+	body := append([]byte(nil), image.Bytes...)
+	contentType := image.ContentType
+	h.mu.Unlock()
+	return body, contentType, true, nil
+}
+
 func (r *ResearchDrawingGenerateRequest) normalize() {
 	r.MethodContent = strings.TrimSpace(r.MethodContent)
 	r.GenerationMode = strings.TrimSpace(r.GenerationMode)
@@ -408,8 +747,33 @@ func (r *ResearchDrawingGenerateRequest) normalize() {
 	}
 }
 
+func (r ResearchDrawingGenerateRequest) isGPT55() bool {
+	return strings.TrimSpace(r.MainModelName) == researchDrawingGPT55ModelName
+}
+
 func (r ResearchDrawingGenerateRequest) isGPTImage2() bool {
 	return strings.TrimSpace(r.ImageGenModelName) == researchDrawingGPTImage2ModelName
+}
+
+func (r ResearchDrawingGenerateRequest) isDirectGPTMode() bool {
+	return r.isGPT55() || r.isGPTImage2()
+}
+
+func (r *ResearchDrawingGenerateRequest) forceDirectGPTMode() {
+	r.OptimizeMethodContent = false
+	r.GenerationMode = "default"
+	r.ExpMode = "demo_planner_critic"
+	r.RetrievalSetting = "none"
+	r.NumCandidates = 1
+	r.MaxCriticRounds = 1
+	r.MaxRefineResolution = "2K"
+	if r.isGPT55() {
+		r.ImageGenModelName = researchDrawingGPTImage2ModelName
+	}
+}
+
+func (r ResearchDrawingGenerateRequest) directQuotaNeed() int {
+	return 1
 }
 
 func (r ResearchDrawingGenerateRequest) quotaNeed() int {
@@ -446,13 +810,99 @@ func (h *ResearchDrawingHandler) researchDrawingMethodOptimizationEnabled(ctx co
 	return settings.ResearchDrawingMethodOptimizationEnabled
 }
 
-func (h *ResearchDrawingHandler) researchDrawingGPTImageConfig(_ context.Context) (string, string) {
-	apiKey := strings.TrimSpace(os.Getenv("GPT_API_KEY"))
-	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("GPT_BASE_URL")), "/")
-	if baseURL == "" {
-		baseURL = researchDrawingDefaultGPTImageBaseURL
+func (h *ResearchDrawingHandler) researchDrawingDirectGPTConfig(req ResearchDrawingGenerateRequest) (researchDrawingDirectGPTConfig, error) {
+	cfg := researchDrawingDirectGPTConfig{
+		TextAPIKey:   strings.TrimSpace(os.Getenv("GPT_API_KEY")),
+		TextBaseURL:  strings.TrimRight(strings.TrimSpace(os.Getenv("GPT_BASE_URL")), "/"),
+		ImageAPIKey:  strings.TrimSpace(os.Getenv("GPT_IMAGE_API_KEY")),
+		ImageBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("GPT_IMAGE_BASE_URL")), "/"),
 	}
-	return apiKey, baseURL
+	if req.isGPT55() {
+		if cfg.TextAPIKey == "" {
+			return cfg, fmt.Errorf("GPT_API_KEY is required for gpt-5.5 direct mode")
+		}
+		if cfg.TextBaseURL == "" {
+			return cfg, fmt.Errorf("GPT_BASE_URL is required for gpt-5.5 direct mode")
+		}
+	}
+	if cfg.ImageAPIKey == "" {
+		return cfg, fmt.Errorf("GPT_IMAGE_API_KEY is required for gpt-image-2 direct mode")
+	}
+	if cfg.ImageBaseURL == "" {
+		return cfg, fmt.Errorf("GPT_IMAGE_BASE_URL is required for gpt-image-2 direct mode")
+	}
+	return cfg, nil
+}
+
+func buildResearchDrawingPromptInput(req ResearchDrawingGenerateRequest) string {
+	return fmt.Sprintf(
+		"Method content:\n%s\n\nCaption:\n%s\n\nAspect ratio: %s\n\nCreate a detailed GPT Image 2 prompt for a polished academic research diagram. Keep it faithful to the method content and caption.",
+		req.MethodContent,
+		req.Caption,
+		req.AspectRatio,
+	)
+}
+
+func buildResearchDrawingDirectImagePrompt(req ResearchDrawingGenerateRequest) string {
+	caption := strings.TrimSpace(req.Caption)
+	if caption == "" {
+		caption = "Academic research diagram"
+	}
+	return fmt.Sprintf(
+		"Create a clean academic research diagram on a white background. Caption or visual intent: %s\n\nSource method content:\n%s\n\nUse a landscape composition, legible labels, simple vector-like shapes, and no figure title.",
+		caption,
+		req.MethodContent,
+	)
+}
+
+func researchDrawingDirectImageSize(_ string) string {
+	return "1536x1024"
+}
+
+func researchDrawingResponsePreview(body []byte) string {
+	preview := string(body)
+	preview = strings.ReplaceAll(preview, "\n", "\\n")
+	preview = strings.ReplaceAll(preview, "\r", "\\r")
+	if len(preview) > 500 {
+		preview = preview[:500]
+	}
+	return preview
+}
+
+func decodeResearchDrawingImageBase64(raw string) ([]byte, error) {
+	value := strings.TrimSpace(raw)
+	if idx := strings.Index(value, ","); idx >= 0 {
+		value = value[idx+1:]
+	}
+	return base64.StdEncoding.DecodeString(value)
+}
+
+func saveResearchDrawingDirectCandidate(jobID string, imageBytes []byte) (string, error) {
+	root := strings.TrimSpace(os.Getenv("RESEARCH_DRAWING_DIRECT_RESULTS_DIR"))
+	if root == "" {
+		if dataDir := strings.TrimSpace(os.Getenv("DATA_DIR")); dataDir != "" {
+			root = filepath.Join(dataDir, "research-drawing", "results")
+		} else {
+			root = filepath.Join(os.TempDir(), "sub2api-research-drawing-results")
+		}
+	}
+	jobDir := filepath.Join(root, jobID)
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+		return "", err
+	}
+	outPath := filepath.Join(jobDir, "candidate_0.png")
+	if err := os.WriteFile(outPath, imageBytes, 0o644); err != nil {
+		return "", err
+	}
+	return outPath, nil
+}
+
+func newResearchDrawingJobID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return "rdgpt_" + hex.EncodeToString(b[:])
+	}
+	return fmt.Sprintf("rdgpt_%d", time.Now().UnixNano())
 }
 
 func isLocalRunMode() bool {

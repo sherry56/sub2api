@@ -95,7 +95,7 @@
             ></textarea>
           </label>
 
-          <div v-if="isCustomGenerationMode" class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900">
+          <div v-if="showPaperBananaParameters" class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900">
             <label class="flex items-start gap-3 text-sm text-gray-700 dark:text-dark-300">
               <input
                 v-model="generationInput.optimizeMethodContent"
@@ -154,23 +154,24 @@
                     {{ option.label }}
                   </option>
                 </select>
-                <span
-                  v-if="form.research_drawing_image_gen_model_name === GPT_IMAGE_2_MODEL"
-                  class="text-xs text-amber-600 dark:text-amber-300"
-                >
-                  GPT Image 2 将使用 GPT_API_KEY 和 GPT_BASE_URL。
-                </span>
               </label>
             </div>
 
             <p
-              v-if="generationInput.generationMode === 'custom'"
+              v-if="generationInput.generationMode === 'custom' && !isDirectGPTMode"
               class="rounded-lg bg-primary-50 p-3 text-sm text-primary-700 dark:bg-primary-950/30 dark:text-primary-300"
             >
               {{ t('researchDrawing.input.customModeHint') }}
             </p>
 
-            <div v-if="isCustomGenerationMode" class="space-y-4">
+            <p
+              v-if="isDirectGPTMode"
+              class="rounded-lg bg-emerald-50 p-3 text-sm font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
+            >
+              快速直连模式
+            </p>
+
+            <div v-if="showPaperBananaParameters" class="space-y-4">
               <div class="grid gap-4 md:grid-cols-3">
                 <label class="field-wrap">
                   <span>{{ t('researchDrawing.labels.expMode') }}</span>
@@ -261,7 +262,7 @@
             <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
               <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.input.generationMode') }}</dt>
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">
-                {{ isCustomGenerationMode ? t('researchDrawing.input.customMode') : t('researchDrawing.input.defaultMode') }}
+                {{ isDirectGPTMode ? '快速直连模式' : (isCustomGenerationMode ? t('researchDrawing.input.customMode') : t('researchDrawing.input.defaultMode')) }}
               </dd>
             </div>
             <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
@@ -512,29 +513,6 @@
               </select>
             </label>
           </div>
-
-          <div class="grid gap-4 md:grid-cols-2">
-            <label class="field-wrap">
-              <span>{{ t('researchDrawing.labels.gptImageBaseURL') }}</span>
-              <input
-                v-model="form.research_drawing_gpt_image_base_url"
-                class="input"
-                type="url"
-                placeholder="https://api.openai.com/v1"
-              />
-            </label>
-
-            <label class="field-wrap">
-              <span>{{ t('researchDrawing.labels.gptImageAPIKey') }}</span>
-              <input
-                v-model="form.research_drawing_gpt_image_api_key"
-                class="input"
-                type="password"
-                :placeholder="lastSettings?.research_drawing_gpt_image_api_key_configured ? t('researchDrawing.input.keepExistingSecret') : 'GPT_API_KEY'"
-                autocomplete="new-password"
-              />
-            </label>
-          </div>
         </section>
 
         <section class="space-y-4">
@@ -610,11 +588,8 @@
                   {{ option.label }}
                 </option>
               </select>
-              <span
-                v-if="form.research_drawing_image_gen_model_name === GPT_IMAGE_2_MODEL"
-                class="text-xs text-amber-600 dark:text-amber-300"
-              >
-                GPT Image 2 将使用 GPT_API_KEY 和 GPT_BASE_URL。
+              <span v-if="isDirectGPTMode" class="text-xs text-emerald-600 dark:text-emerald-300">
+                快速直连模式
               </span>
             </label>
           </div>
@@ -654,8 +629,6 @@ type ResearchDrawingForm = {
   research_drawing_max_critic_rounds: number
   research_drawing_main_model_name: string
   research_drawing_image_gen_model_name: string
-  research_drawing_gpt_image_api_key: string
-  research_drawing_gpt_image_base_url: string
   research_drawing_max_refine_resolution: string
   research_drawing_unit_price: number
 }
@@ -737,8 +710,6 @@ const RESEARCH_DRAWING_DEFAULTS: ResearchDrawingForm = {
   research_drawing_max_critic_rounds: 2,
   research_drawing_main_model_name: 'openrouter/google/gemini-3-flash-preview',
   research_drawing_image_gen_model_name: 'openrouter/google/gemini-3.1-flash-image-preview',
-  research_drawing_gpt_image_api_key: '',
-  research_drawing_gpt_image_base_url: 'https://api.openai.com/v1',
   research_drawing_max_refine_resolution: '2K',
   research_drawing_unit_price: 2.99,
 }
@@ -792,7 +763,13 @@ const generationInput = reactive<PaperBananaGenerationInput>({
   ...PAPERBANANA_INPUT_DEFAULTS,
 })
 
-const isCustomGenerationMode = computed(() => generationInput.generationMode === 'custom')
+const isDirectGPTMode = computed(
+  () =>
+    form.research_drawing_main_model_name === GPT_5_5_MODEL ||
+    form.research_drawing_image_gen_model_name === GPT_IMAGE_2_MODEL,
+)
+const isCustomGenerationMode = computed(() => generationInput.generationMode === 'custom' && !isDirectGPTMode.value)
+const showPaperBananaParameters = computed(() => isCustomGenerationMode.value)
 
 const methodOptimizationEnabled = computed(
   () => appStore.cachedPublicSettings?.research_drawing_method_optimization_enabled !== false,
@@ -802,6 +779,9 @@ const methodOptimizationDefaultEnabled = computed(
 )
 
 const quotaNeed = computed(() => {
+  if (isDirectGPTMode.value) {
+    return 1
+  }
   const candidates = Math.max(1, Number(form.research_drawing_num_candidates) || 1)
   const criticRounds = Math.max(1, Number(form.research_drawing_max_critic_rounds) || 1)
   return candidates * (1 + criticRounds)
@@ -947,9 +927,6 @@ function normalizeFormValues() {
   if (!allowedImageModelValues.has(form.research_drawing_image_gen_model_name)) {
     form.research_drawing_image_gen_model_name = RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
   }
-  form.research_drawing_gpt_image_base_url =
-    form.research_drawing_gpt_image_base_url?.trim().replace(/\/+$/, '') || RESEARCH_DRAWING_DEFAULTS.research_drawing_gpt_image_base_url
-  form.research_drawing_gpt_image_api_key = form.research_drawing_gpt_image_api_key?.trim() || ''
   form.research_drawing_unit_price = Math.max(
     0.01,
     Number(form.research_drawing_unit_price) || RESEARCH_DRAWING_DEFAULTS.research_drawing_unit_price,
@@ -965,8 +942,6 @@ function applySettings(settings: SystemSettings) {
   form.research_drawing_max_critic_rounds = settings.research_drawing_max_critic_rounds || RESEARCH_DRAWING_DEFAULTS.research_drawing_max_critic_rounds
   form.research_drawing_main_model_name = settings.research_drawing_main_model_name || RESEARCH_DRAWING_DEFAULTS.research_drawing_main_model_name
   form.research_drawing_image_gen_model_name = settings.research_drawing_image_gen_model_name || RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
-  form.research_drawing_gpt_image_api_key = ''
-  form.research_drawing_gpt_image_base_url = settings.research_drawing_gpt_image_base_url || RESEARCH_DRAWING_DEFAULTS.research_drawing_gpt_image_base_url
   form.research_drawing_max_refine_resolution = settings.research_drawing_max_refine_resolution || RESEARCH_DRAWING_DEFAULTS.research_drawing_max_refine_resolution
   form.research_drawing_unit_price = settings.research_drawing_unit_price || RESEARCH_DRAWING_DEFAULTS.research_drawing_unit_price
   normalizeFormValues()
@@ -995,7 +970,7 @@ async function startGenerationPreview() {
     appStore.showWarning(t('researchDrawing.input.validationRequired'))
     return
   }
-  if (!methodOptimizationEnabled.value) {
+  if (isDirectGPTMode.value || !methodOptimizationEnabled.value) {
     generationInput.optimizeMethodContent = false
   }
 
@@ -1009,11 +984,11 @@ async function startGenerationPreview() {
     const payload: ResearchDrawingGenerateRequest = {
       method_content: generationInput.methodContent,
       caption: generationInput.caption,
-      generation_mode: generationInput.generationMode,
-      optimize_method_content: isCustomGenerationMode.value ? generationInput.optimizeMethodContent : false,
+      generation_mode: isDirectGPTMode.value ? 'default' : generationInput.generationMode,
+      optimize_method_content: isCustomGenerationMode.value && !isDirectGPTMode.value ? generationInput.optimizeMethodContent : false,
       main_model_name: form.research_drawing_main_model_name,
       image_gen_model_name: form.research_drawing_image_gen_model_name,
-      ...(isCustomGenerationMode.value
+      ...(isCustomGenerationMode.value && !isDirectGPTMode.value
         ? {
             exp_mode: form.research_drawing_exp_mode,
             retrieval_setting: form.research_drawing_retrieval_setting,
@@ -1228,8 +1203,6 @@ async function saveSettings() {
       research_drawing_max_critic_rounds: form.research_drawing_max_critic_rounds,
       research_drawing_main_model_name: form.research_drawing_main_model_name,
       research_drawing_image_gen_model_name: form.research_drawing_image_gen_model_name,
-      research_drawing_gpt_image_api_key: form.research_drawing_gpt_image_api_key,
-      research_drawing_gpt_image_base_url: form.research_drawing_gpt_image_base_url,
       research_drawing_max_refine_resolution: form.research_drawing_max_refine_resolution,
       research_drawing_unit_price: form.research_drawing_unit_price,
     }

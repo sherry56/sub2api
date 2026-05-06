@@ -18,6 +18,7 @@ export interface ResearchDrawingGenerateRequest {
 export interface ResearchDrawingGenerateResponse {
   job_id: string
   status: string
+  mode?: string
   paperbanana_url?: string
   paperbanana_user?: string
   charge: number
@@ -29,6 +30,7 @@ export interface ResearchDrawingJobStatus {
   job_id?: string
   username?: string
   status: 'running' | 'done' | 'error' | 'unknown'
+  mode?: string
   elapsed_sec?: number
   candidate_count?: number
   candidate_ids?: number[]
