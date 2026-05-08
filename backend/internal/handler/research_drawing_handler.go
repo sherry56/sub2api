@@ -142,7 +142,7 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 	var directCfg researchDrawingDirectGPTConfig
 	if directMode {
 		var cfgErr error
-		directCfg, cfgErr = h.researchDrawingDirectGPTConfig(req)
+		directCfg, cfgErr = h.researchDrawingDirectGPTConfig(c.Request.Context(), req)
 		if cfgErr != nil {
 			response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "RESEARCH_DRAWING_GPT_CONFIG_INVALID", cfgErr.Error()))
 			return
@@ -810,12 +810,37 @@ func (h *ResearchDrawingHandler) researchDrawingMethodOptimizationEnabled(ctx co
 	return settings.ResearchDrawingMethodOptimizationEnabled
 }
 
-func (h *ResearchDrawingHandler) researchDrawingDirectGPTConfig(req ResearchDrawingGenerateRequest) (researchDrawingDirectGPTConfig, error) {
+func (h *ResearchDrawingHandler) researchDrawingDirectGPTConfig(ctx context.Context, req ResearchDrawingGenerateRequest) (researchDrawingDirectGPTConfig, error) {
+	settingsAPIKey := ""
+	settingsBaseURL := ""
+	if h.settingService != nil {
+		if settings, err := h.settingService.GetAllSettings(ctx); err == nil && settings != nil {
+			settingsAPIKey = strings.TrimSpace(settings.ResearchDrawingGPTImageAPIKey)
+			settingsBaseURL = strings.TrimRight(strings.TrimSpace(settings.ResearchDrawingGPTImageBaseURL), "/")
+		}
+	}
+
 	cfg := researchDrawingDirectGPTConfig{
-		TextAPIKey:   strings.TrimSpace(os.Getenv("GPT_API_KEY")),
-		TextBaseURL:  strings.TrimRight(strings.TrimSpace(os.Getenv("GPT_BASE_URL")), "/"),
-		ImageAPIKey:  strings.TrimSpace(os.Getenv("GPT_IMAGE_API_KEY")),
-		ImageBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("GPT_IMAGE_BASE_URL")), "/"),
+		TextAPIKey: firstNonEmptyResearchDrawing(
+			settingsAPIKey,
+			os.Getenv("GPT_API_KEY"),
+			os.Getenv("GPT_IMAGE_API_KEY"),
+		),
+		TextBaseURL: strings.TrimRight(firstNonEmptyResearchDrawing(
+			settingsBaseURL,
+			os.Getenv("GPT_BASE_URL"),
+			os.Getenv("GPT_IMAGE_BASE_URL"),
+		), "/"),
+		ImageAPIKey: firstNonEmptyResearchDrawing(
+			settingsAPIKey,
+			os.Getenv("GPT_IMAGE_API_KEY"),
+			os.Getenv("GPT_API_KEY"),
+		),
+		ImageBaseURL: strings.TrimRight(firstNonEmptyResearchDrawing(
+			settingsBaseURL,
+			os.Getenv("GPT_IMAGE_BASE_URL"),
+			os.Getenv("GPT_BASE_URL"),
+		), "/"),
 	}
 	if req.isGPT55() {
 		if cfg.TextAPIKey == "" {
@@ -832,6 +857,15 @@ func (h *ResearchDrawingHandler) researchDrawingDirectGPTConfig(req ResearchDraw
 		return cfg, fmt.Errorf("GPT_IMAGE_BASE_URL is required for gpt-image-2 direct mode")
 	}
 	return cfg, nil
+}
+
+func firstNonEmptyResearchDrawing(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func buildResearchDrawingPromptInput(req ResearchDrawingGenerateRequest) string {
