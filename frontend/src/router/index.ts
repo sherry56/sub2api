@@ -366,21 +366,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/research-drawing-settings',
-    name: 'AdminResearchDrawingSettings',
-    component: () => import('@/views/user/ResearchDrawingView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Research Drawing',
-      titleKey: 'researchDrawing.title',
-      descriptionKey: 'researchDrawing.settingsDesc',
-      breadcrumbs: [
-        { label: '科研绘图', to: '/admin/research-drawing-settings' }
-      ]
-    }
-  },
-  {
     path: '/admin/ops',
     name: 'AdminOps',
     component: () => import('@/views/admin/ops/OpsDashboard.vue'),

@@ -154,7 +154,6 @@ Then open:
 
 ```text
 /admin/research-drawing
-/admin/research-drawing-settings
 ```
 
 Expected generation chain:

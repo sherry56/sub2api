@@ -64,8 +64,10 @@ type researchDrawingDirectImage struct {
 }
 
 type researchDrawingDirectGPTConfig struct {
-	ImageAPIKey  string
-	ImageBaseURL string
+	ImageAPIKey    string
+	ImageBaseURL   string
+	KeySource      string
+	BaseURLSource  string
 }
 
 type ResearchDrawingGenerateRequest struct {
@@ -470,11 +472,12 @@ func (h *ResearchDrawingHandler) generateResearchDrawingDirectImage(ctx context.
 		"size":   researchDrawingDirectImageSize(req.AspectRatio),
 	}
 	body, contentType, statusCode, err := h.postResearchDrawingGPTJSON(ctx, endpoint, cfg.ImageAPIKey, payload)
+	log.Printf("[ResearchDrawing] direct GPT image request final_image_url=%s base_url_source=%s key_source=%s key_len=%d status_code=%d", endpoint, cfg.BaseURLSource, cfg.KeySource, len(cfg.ImageAPIKey), statusCode)
 	if err != nil {
 		return nil, err
 	}
 	if statusCode < 200 || statusCode >= 300 {
-		log.Printf("[ResearchDrawing] direct GPT image request failed url=%s status_code=%d content_type=%s response_preview=%s", endpoint, statusCode, contentType, researchDrawingResponsePreview(body))
+		log.Printf("[ResearchDrawing] direct GPT image request failed final_image_url=%s base_url_source=%s key_source=%s key_len=%d status_code=%d content_type=%s response_preview=%s", endpoint, cfg.BaseURLSource, cfg.KeySource, len(cfg.ImageAPIKey), statusCode, contentType, researchDrawingResponsePreview(body))
 		return nil, fmt.Errorf("gpt-image-2 image request failed: status_code=%d content_type=%s response_preview=%s", statusCode, contentType, researchDrawingResponsePreview(body))
 	}
 	if strings.Contains(strings.ToLower(contentType), "text/html") {
@@ -707,44 +710,37 @@ func (h *ResearchDrawingHandler) researchDrawingUnitPrice(ctx context.Context) f
 	return settings.ResearchDrawingUnitPrice
 }
 
-func (h *ResearchDrawingHandler) researchDrawingDirectGPTConfig(ctx context.Context, req ResearchDrawingGenerateRequest) (researchDrawingDirectGPTConfig, error) {
-	settingsAPIKey := ""
-	settingsBaseURL := ""
-	if h.settingService != nil {
-		if settings, err := h.settingService.GetAllSettings(ctx); err == nil && settings != nil {
-			settingsAPIKey = strings.TrimSpace(settings.ResearchDrawingGPTImageAPIKey)
-			settingsBaseURL = strings.TrimRight(strings.TrimSpace(settings.ResearchDrawingGPTImageBaseURL), "/")
-		}
-	}
-
+func (h *ResearchDrawingHandler) researchDrawingDirectGPTConfig(_ context.Context, _ ResearchDrawingGenerateRequest) (researchDrawingDirectGPTConfig, error) {
+	apiKey, keySource := firstNonEmptyResearchDrawingValue(
+		"GPT_IMAGE_API_KEY", os.Getenv("GPT_IMAGE_API_KEY"),
+		"GPT_API_KEY", os.Getenv("GPT_API_KEY"),
+	)
+	baseURL, baseURLSource := firstNonEmptyResearchDrawingValue(
+		"GPT_IMAGE_BASE_URL", os.Getenv("GPT_IMAGE_BASE_URL"),
+		"GPT_BASE_URL", os.Getenv("GPT_BASE_URL"),
+	)
 	cfg := researchDrawingDirectGPTConfig{
-		ImageAPIKey: firstNonEmptyResearchDrawing(
-			settingsAPIKey,
-			os.Getenv("GPT_IMAGE_API_KEY"),
-			os.Getenv("GPT_API_KEY"),
-		),
-		ImageBaseURL: strings.TrimRight(firstNonEmptyResearchDrawing(
-			settingsBaseURL,
-			os.Getenv("GPT_IMAGE_BASE_URL"),
-			os.Getenv("GPT_BASE_URL"),
-		), "/"),
+		ImageAPIKey:   apiKey,
+		ImageBaseURL:  strings.TrimRight(baseURL, "/"),
+		KeySource:     keySource,
+		BaseURLSource: baseURLSource,
 	}
 	if cfg.ImageAPIKey == "" {
-		return cfg, fmt.Errorf("GPT_IMAGE_API_KEY is required for gpt-image-2 direct mode")
+		return cfg, fmt.Errorf("GPT_IMAGE_API_KEY or GPT_API_KEY is required for gpt-image-2 direct mode")
 	}
 	if cfg.ImageBaseURL == "" {
-		return cfg, fmt.Errorf("GPT_IMAGE_BASE_URL is required for gpt-image-2 direct mode")
+		return cfg, fmt.Errorf("GPT_IMAGE_BASE_URL or GPT_BASE_URL is required for gpt-image-2 direct mode")
 	}
 	return cfg, nil
 }
 
-func firstNonEmptyResearchDrawing(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
+func firstNonEmptyResearchDrawingValue(nameValuePairs ...string) (string, string) {
+	for i := 0; i+1 < len(nameValuePairs); i += 2 {
+		if trimmed := strings.TrimSpace(nameValuePairs[i+1]); trimmed != "" {
+			return trimmed, nameValuePairs[i]
 		}
 	}
-	return ""
+	return "", ""
 }
 
 func buildResearchDrawingDirectImagePrompt(req ResearchDrawingGenerateRequest) string {

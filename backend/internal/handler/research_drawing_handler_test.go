@@ -72,15 +72,15 @@ func (r *researchDrawingSettingRepoStub) Delete(ctx context.Context, key string)
 	return nil
 }
 
-func TestResearchDrawingGPTImage2UsesDirectModeConfigFromSettings(t *testing.T) {
-	t.Setenv("GPT_API_KEY", "")
-	t.Setenv("GPT_BASE_URL", "")
-	t.Setenv("GPT_IMAGE_API_KEY", "")
-	t.Setenv("GPT_IMAGE_BASE_URL", "")
+func TestResearchDrawingGPTImage2UsesDirectModeConfigFromEnv(t *testing.T) {
+	t.Setenv("GPT_API_KEY", "sk-gpt-fallback")
+	t.Setenv("GPT_BASE_URL", "https://fallback.example/v1")
+	t.Setenv("GPT_IMAGE_API_KEY", "sk-image-env")
+	t.Setenv("GPT_IMAGE_BASE_URL", "https://image.example/v1/")
 
 	settingSvc := service.NewSettingService(&researchDrawingSettingRepoStub{values: map[string]string{
 		service.SettingKeyResearchDrawingGPTImageAPIKey:  "sk-from-settings",
-		service.SettingKeyResearchDrawingGPTImageBaseURL: "https://openai.example/v1/",
+		service.SettingKeyResearchDrawingGPTImageBaseURL: "https://api.openai.com/v1",
 	}}, &config.Config{})
 	handler := NewResearchDrawingHandler(nil, settingSvc)
 
@@ -102,11 +102,68 @@ func TestResearchDrawingGPTImage2UsesDirectModeConfigFromSettings(t *testing.T) 
 	if err != nil {
 		t.Fatalf("researchDrawingDirectGPTConfig returned error: %v", err)
 	}
-	if cfg.ImageAPIKey != "sk-from-settings" {
-		t.Fatalf("ImageAPIKey = %q, want settings key", cfg.ImageAPIKey)
+	if cfg.ImageAPIKey != "sk-image-env" {
+		t.Fatalf("ImageAPIKey = %q, want GPT_IMAGE_API_KEY", cfg.ImageAPIKey)
 	}
-	if cfg.ImageBaseURL != "https://openai.example/v1" {
-		t.Fatalf("ImageBaseURL = %q, want trimmed settings base URL", cfg.ImageBaseURL)
+	if cfg.ImageBaseURL != "https://image.example/v1" {
+		t.Fatalf("ImageBaseURL = %q, want trimmed GPT_IMAGE_BASE_URL", cfg.ImageBaseURL)
+	}
+	if cfg.KeySource != "GPT_IMAGE_API_KEY" || cfg.BaseURLSource != "GPT_IMAGE_BASE_URL" {
+		t.Fatalf("sources = (%q, %q), want GPT_IMAGE sources", cfg.KeySource, cfg.BaseURLSource)
+	}
+}
+
+func TestResearchDrawingGPTImage2FallsBackToGPTEnv(t *testing.T) {
+	t.Setenv("GPT_API_KEY", "sk-gpt-fallback")
+	t.Setenv("GPT_BASE_URL", "https://fallback.example/v1/")
+	t.Setenv("GPT_IMAGE_API_KEY", "")
+	t.Setenv("GPT_IMAGE_BASE_URL", "")
+
+	handler := NewResearchDrawingHandler(nil, nil)
+	req := ResearchDrawingGenerateRequest{
+		MethodContent:     "method",
+		ImageGenModelName: researchDrawingGPTImage2ModelName,
+	}
+	req.normalize()
+
+	cfg, err := handler.researchDrawingDirectGPTConfig(context.Background(), req)
+	if err != nil {
+		t.Fatalf("researchDrawingDirectGPTConfig returned error: %v", err)
+	}
+	if cfg.ImageAPIKey != "sk-gpt-fallback" {
+		t.Fatalf("ImageAPIKey = %q, want GPT_API_KEY fallback", cfg.ImageAPIKey)
+	}
+	if cfg.ImageBaseURL != "https://fallback.example/v1" {
+		t.Fatalf("ImageBaseURL = %q, want trimmed GPT_BASE_URL fallback", cfg.ImageBaseURL)
+	}
+	if cfg.KeySource != "GPT_API_KEY" || cfg.BaseURLSource != "GPT_BASE_URL" {
+		t.Fatalf("sources = (%q, %q), want GPT fallback sources", cfg.KeySource, cfg.BaseURLSource)
+	}
+}
+
+func TestResearchDrawingGPTImage2DoesNotDefaultToOpenAIBaseURL(t *testing.T) {
+	t.Setenv("GPT_API_KEY", "")
+	t.Setenv("GPT_BASE_URL", "")
+	t.Setenv("GPT_IMAGE_API_KEY", "")
+	t.Setenv("GPT_IMAGE_BASE_URL", "")
+
+	settingSvc := service.NewSettingService(&researchDrawingSettingRepoStub{values: map[string]string{
+		service.SettingKeyResearchDrawingGPTImageAPIKey:  "sk-from-settings",
+		service.SettingKeyResearchDrawingGPTImageBaseURL: "https://api.openai.com/v1",
+	}}, &config.Config{})
+	handler := NewResearchDrawingHandler(nil, settingSvc)
+	req := ResearchDrawingGenerateRequest{
+		MethodContent:     "method",
+		ImageGenModelName: researchDrawingGPTImage2ModelName,
+	}
+	req.normalize()
+
+	cfg, err := handler.researchDrawingDirectGPTConfig(context.Background(), req)
+	if err == nil {
+		t.Fatalf("researchDrawingDirectGPTConfig returned nil error with empty env and cfg=%+v", cfg)
+	}
+	if strings.Contains(cfg.ImageBaseURL, "api.openai.com") {
+		t.Fatalf("ImageBaseURL = %q, want no default OpenAI fallback", cfg.ImageBaseURL)
 	}
 }
 
@@ -133,8 +190,17 @@ func TestResearchDrawingGPTImage2IgnoresGPT55MainModel(t *testing.T) {
 				http.Error(w, "bad json", http.StatusBadRequest)
 				return
 			}
+			if got := r.Header.Get("Authorization"); got != "Bearer sk-image" {
+				t.Errorf("Authorization = %q, want Bearer sk-image", got)
+			}
+			if len(payload) != 3 {
+				t.Errorf("image request payload keys = %v, want only model/prompt/size", payload)
+			}
 			if payload["model"] != researchDrawingGPTImage2ModelName {
 				t.Errorf("image model = %v, want %s", payload["model"], researchDrawingGPTImage2ModelName)
+			}
+			if _, ok := payload["size"]; !ok {
+				t.Error("image request payload missing size")
 			}
 			prompt, _ := payload["prompt"].(string)
 			if !strings.Contains(prompt, "raw method content") || !strings.Contains(prompt, "raw caption") {
