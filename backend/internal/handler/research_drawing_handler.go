@@ -28,8 +28,6 @@ import (
 
 const (
 	researchDrawingUnitPrice             = 2.99
-	researchDrawingDefaultMainModelName  = "openrouter/google/gemini-3-flash-preview"
-	researchDrawingGPT55ModelName        = "gpt-5.5"
 	researchDrawingDefaultImageModelName = "openrouter/google/gemini-3.1-flash-image-preview"
 	researchDrawingGPTImage2ModelName    = "gpt-image-2"
 )
@@ -66,8 +64,6 @@ type researchDrawingDirectImage struct {
 }
 
 type researchDrawingDirectGPTConfig struct {
-	TextAPIKey   string
-	TextBaseURL  string
 	ImageAPIKey  string
 	ImageBaseURL string
 }
@@ -300,19 +296,19 @@ func (h *ResearchDrawingHandler) refundJobOnce(c *gin.Context, userID int64, job
 
 func (h *ResearchDrawingHandler) submitToPaperBanana(c *gin.Context, user *service.User, req ResearchDrawingGenerateRequest) (map[string]any, error) {
 	payload := map[string]any{
-		"user_id":                 user.ID,
-		"username":                paperBananaUsername(user),
-		"email":                   user.Email,
-		"method_content":          req.MethodContent,
-		"caption":                 req.Caption,
-		"generation_mode":         req.GenerationMode,
-		"exp_mode":                req.ExpMode,
-		"retrieval_setting":       req.RetrievalSetting,
-		"num_candidates":          req.NumCandidates,
-		"aspect_ratio":            req.AspectRatio,
-		"max_critic_rounds":       req.MaxCriticRounds,
-		"max_refine_resolution":   req.MaxRefineResolution,
-		"image_gen_model_name":    req.ImageGenModelName,
+		"user_id":               user.ID,
+		"username":              paperBananaUsername(user),
+		"email":                 user.Email,
+		"method_content":        req.MethodContent,
+		"caption":               req.Caption,
+		"generation_mode":       req.GenerationMode,
+		"exp_mode":              req.ExpMode,
+		"retrieval_setting":     req.RetrievalSetting,
+		"num_candidates":        req.NumCandidates,
+		"aspect_ratio":          req.AspectRatio,
+		"max_critic_rounds":     req.MaxCriticRounds,
+		"max_refine_resolution": req.MaxRefineResolution,
+		"image_gen_model_name":  req.ImageGenModelName,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -464,56 +460,6 @@ func (h *ResearchDrawingHandler) runDirectGPTResearchDrawingJob(jobID string, re
 	}
 	h.mu.Unlock()
 	log.Printf("[ResearchDrawing] direct GPT candidate image saved job_id=%s candidate_id=0 bytes=%d path=%s", jobID, len(imageBytes), outPath)
-}
-
-func (h *ResearchDrawingHandler) createResearchDrawingDirectImagePrompt(ctx context.Context, req ResearchDrawingGenerateRequest, cfg researchDrawingDirectGPTConfig) (string, error) {
-	endpoint := strings.TrimRight(cfg.TextBaseURL, "/") + "/chat/completions"
-	payload := map[string]any{
-		"model": researchDrawingGPT55ModelName,
-		"messages": []map[string]string{
-			{
-				"role": "system",
-				"content": strings.Join([]string{
-					"You convert scientific paper method text into a concise image generation prompt.",
-					"Return only the final prompt.",
-					"The prompt must describe a clean academic diagram on a white background, with legible labels and no figure title.",
-				}, " "),
-			},
-			{
-				"role":    "user",
-				"content": buildResearchDrawingPromptInput(req),
-			},
-		},
-		"temperature":           0.4,
-		"max_completion_tokens": 1200,
-	}
-	body, contentType, statusCode, err := h.postResearchDrawingGPTJSON(ctx, endpoint, cfg.TextAPIKey, payload)
-	if err != nil {
-		return "", err
-	}
-	if statusCode < 200 || statusCode >= 300 {
-		return "", fmt.Errorf("gpt-5.5 text request failed: status_code=%d content_type=%s response_preview=%s", statusCode, contentType, researchDrawingResponsePreview(body))
-	}
-
-	var parsed struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", fmt.Errorf("parse gpt-5.5 text response: %w; response_preview=%s", err, researchDrawingResponsePreview(body))
-	}
-	if len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("gpt-5.5 text response contained no choices")
-	}
-	prompt := strings.TrimSpace(parsed.Choices[0].Message.Content)
-	if prompt == "" {
-		return "", fmt.Errorf("gpt-5.5 text response contained empty content")
-	}
-	log.Printf("[ResearchDrawing] direct GPT text prompt generated model=%s request_url=%s prompt_len=%d", researchDrawingGPT55ModelName, endpoint, len(prompt))
-	return prompt, nil
 }
 
 func (h *ResearchDrawingHandler) generateResearchDrawingDirectImage(ctx context.Context, req ResearchDrawingGenerateRequest, imagePrompt string, cfg researchDrawingDirectGPTConfig) ([]byte, error) {
@@ -761,17 +707,6 @@ func (h *ResearchDrawingHandler) researchDrawingUnitPrice(ctx context.Context) f
 	return settings.ResearchDrawingUnitPrice
 }
 
-func (h *ResearchDrawingHandler) researchDrawingMethodOptimizationEnabled(ctx context.Context) bool {
-	if h.settingService == nil {
-		return true
-	}
-	settings, err := h.settingService.GetAllSettings(ctx)
-	if err != nil || settings == nil {
-		return true
-	}
-	return settings.ResearchDrawingMethodOptimizationEnabled
-}
-
 func (h *ResearchDrawingHandler) researchDrawingDirectGPTConfig(ctx context.Context, req ResearchDrawingGenerateRequest) (researchDrawingDirectGPTConfig, error) {
 	settingsAPIKey := ""
 	settingsBaseURL := ""
@@ -783,16 +718,6 @@ func (h *ResearchDrawingHandler) researchDrawingDirectGPTConfig(ctx context.Cont
 	}
 
 	cfg := researchDrawingDirectGPTConfig{
-		TextAPIKey: firstNonEmptyResearchDrawing(
-			settingsAPIKey,
-			os.Getenv("GPT_API_KEY"),
-			os.Getenv("GPT_IMAGE_API_KEY"),
-		),
-		TextBaseURL: strings.TrimRight(firstNonEmptyResearchDrawing(
-			settingsBaseURL,
-			os.Getenv("GPT_BASE_URL"),
-			os.Getenv("GPT_IMAGE_BASE_URL"),
-		), "/"),
 		ImageAPIKey: firstNonEmptyResearchDrawing(
 			settingsAPIKey,
 			os.Getenv("GPT_IMAGE_API_KEY"),
@@ -820,15 +745,6 @@ func firstNonEmptyResearchDrawing(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func buildResearchDrawingPromptInput(req ResearchDrawingGenerateRequest) string {
-	return fmt.Sprintf(
-		"Method content:\n%s\n\nCaption:\n%s\n\nAspect ratio: %s\n\nCreate a detailed GPT Image 2 prompt for a polished academic research diagram. Keep it faithful to the method content and caption.",
-		req.MethodContent,
-		req.Caption,
-		req.AspectRatio,
-	)
 }
 
 func buildResearchDrawingDirectImagePrompt(req ResearchDrawingGenerateRequest) string {
