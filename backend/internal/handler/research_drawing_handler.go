@@ -442,17 +442,6 @@ func (h *ResearchDrawingHandler) runDirectGPTResearchDrawingJob(jobID string, re
 	defer cancel()
 
 	imagePrompt := buildResearchDrawingDirectImagePrompt(req)
-	if req.isGPT55() {
-		generatedPrompt, err := h.createResearchDrawingDirectImagePrompt(ctx, req, cfg)
-		if err != nil {
-			h.failDirectJob(jobID, err)
-			return
-		}
-		if strings.TrimSpace(generatedPrompt) != "" {
-			imagePrompt = strings.TrimSpace(generatedPrompt)
-		}
-	}
-
 	imageBytes, err := h.generateResearchDrawingDirectImage(ctx, req, imagePrompt, cfg)
 	if err != nil {
 		h.failDirectJob(jobID, err)
@@ -756,7 +745,7 @@ func (r ResearchDrawingGenerateRequest) isGPTImage2() bool {
 }
 
 func (r ResearchDrawingGenerateRequest) isDirectGPTMode() bool {
-	return r.isGPT55() || r.isGPTImage2()
+	return r.isGPTImage2()
 }
 
 func (r *ResearchDrawingGenerateRequest) forceDirectGPTMode() {
@@ -765,11 +754,8 @@ func (r *ResearchDrawingGenerateRequest) forceDirectGPTMode() {
 	r.ExpMode = "demo_planner_critic"
 	r.RetrievalSetting = "none"
 	r.NumCandidates = 1
-	r.MaxCriticRounds = 1
+	r.MaxCriticRounds = 0
 	r.MaxRefineResolution = "2K"
-	if r.isGPT55() {
-		r.ImageGenModelName = researchDrawingGPTImage2ModelName
-	}
 }
 
 func (r ResearchDrawingGenerateRequest) directQuotaNeed() int {
@@ -842,7 +828,7 @@ func (h *ResearchDrawingHandler) researchDrawingDirectGPTConfig(ctx context.Cont
 			os.Getenv("GPT_BASE_URL"),
 		), "/"),
 	}
-	if req.isGPT55() {
+	if req.isGPT55() && !req.isGPTImage2() {
 		if cfg.TextAPIKey == "" {
 			return cfg, fmt.Errorf("GPT_API_KEY is required for gpt-5.5 direct mode")
 		}
@@ -878,15 +864,15 @@ func buildResearchDrawingPromptInput(req ResearchDrawingGenerateRequest) string 
 }
 
 func buildResearchDrawingDirectImagePrompt(req ResearchDrawingGenerateRequest) string {
+	methodContent := strings.TrimSpace(req.MethodContent)
 	caption := strings.TrimSpace(req.Caption)
 	if caption == "" {
-		caption = "Academic research diagram"
+		return methodContent
 	}
-	return fmt.Sprintf(
-		"Create a clean academic research diagram on a white background. Caption or visual intent: %s\n\nSource method content:\n%s\n\nUse a landscape composition, legible labels, simple vector-like shapes, and no figure title.",
-		caption,
-		req.MethodContent,
-	)
+	if methodContent == "" {
+		return caption
+	}
+	return fmt.Sprintf("Caption:\n%s\n\nContent:\n%s", caption, methodContent)
 }
 
 func researchDrawingDirectImageSize(_ string) string {

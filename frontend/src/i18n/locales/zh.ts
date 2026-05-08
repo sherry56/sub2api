@@ -5974,12 +5974,12 @@ export default {
     kicker: '',
     description: '自动化学术绘图的专用预训练模型',
     topNote: '一键生成SCI配色的论文框架图和统计图',
-    unitPriceNote: '单次价格：2.99元/次',
+    unitPriceNote: '价格按所选生图模型显示',
     userHero: {
       title: '科研绘图专用预训练模型',
       subtitle: '一键生成 SCI 风格论文框架图、机制流程图与统计图',
       description: '面向论文写作、课题汇报和学术展示场景，内置科研配色、学术化版式与图表表达规范，帮助快速生成清晰、专业、可用于论文和 PPT 展示的科研图形。',
-      price: '单次价格：2.99元/次',
+      price: '价格按所选生图模型显示',
       badges: {
         research: '科研专用',
         sci: 'SCI配色',
@@ -6093,7 +6093,6 @@ export default {
     sections: {
       pipeline: '流程参数',
       generation: '生成参数',
-      models: '模型参数',
     },
     labels: {
       expMode: '模式',
@@ -6102,10 +6101,7 @@ export default {
       aspectRatio: '宽高比',
       maxCriticRounds: 'Critic 轮数',
       maxRefineResolution: '精修分辨率上限',
-      mainModelName: '主模型',
       imageGenModelName: '生图模型',
-      gptImageAPIKey: 'GPT API Key',
-      gptImageBaseURL: 'GPT Base URL',
       unitPrice: '单次价格',
     },
     options: {
@@ -6123,7 +6119,6 @@ export default {
       none: '不检索',
     },
     placeholders: {
-      mainModelName: '留空时使用系统默认值',
       imageGenModelName: '留空时使用系统默认值',
     },
     resetDefaults: '恢复默认参数',

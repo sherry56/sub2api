@@ -108,20 +108,7 @@
                 <span>{{ t('researchDrawing.input.generationMode') }}</span>
                 <select v-model="generationInput.generationMode" class="input">
                   <option value="default">{{ t('researchDrawing.input.defaultMode') }}</option>
-                  <option value="custom">{{ t('researchDrawing.input.customMode') }}</option>
-                </select>
-              </label>
-
-              <label class="field-wrap">
-                <span>{{ t('researchDrawing.labels.mainModelName') }}</span>
-                <select v-model="form.research_drawing_main_model_name" class="input">
-                  <option
-                    v-for="option in mainModelOptions"
-                    :key="option.value"
-                    :value="option.value"
-                  >
-                    {{ option.label }}
-                  </option>
+                  <option value="custom" :disabled="!canUseCustomGenerationMode">{{ t('researchDrawing.input.customMode') }}</option>
                 </select>
               </label>
 
@@ -140,10 +127,15 @@
                   快速直连模式
                 </span>
               </label>
+
+              <label class="field-wrap">
+                <span>{{ t('researchDrawing.labels.unitPrice') }}</span>
+                <input class="input" type="text" :value="unitPriceText" readonly />
+              </label>
             </div>
 
             <p
-              v-if="generationInput.generationMode === 'custom' && !isDirectGPTMode"
+              v-if="isCustomGenerationMode"
               class="rounded-lg bg-primary-50 p-3 text-sm text-primary-700 dark:bg-primary-950/30 dark:text-primary-300"
             >
               {{ t('researchDrawing.input.customModeHint') }}
@@ -246,7 +238,7 @@
           <dl class="grid grid-cols-2 gap-3 text-sm">
             <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
               <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.run.unitPrice') }}</dt>
-              <dd class="mt-1 font-semibold text-gray-900 dark:text-white">2.99/次</dd>
+              <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ unitPriceText }}</dd>
             </div>
             <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
               <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.run.quotaNeed') }}</dt>
@@ -511,13 +503,28 @@
           <h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.sections.generation') }}</h4>
           <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <label class="field-wrap">
+              <span>{{ t('researchDrawing.labels.imageGenModelName') }}</span>
+              <select v-model="form.research_drawing_image_gen_model_name" class="input">
+                <option
+                  v-for="option in imageModelOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+              <span v-if="isDirectGPTMode" class="text-xs text-emerald-600 dark:text-emerald-300">
+                快速直连模式
+              </span>
+            </label>
+
+            <label class="field-wrap">
               <span>{{ t('researchDrawing.labels.unitPrice') }}</span>
               <input
-                v-model.number="form.research_drawing_unit_price"
                 class="input"
-                type="number"
-                min="0.01"
-                step="0.01"
+                type="text"
+                :value="unitPriceText"
+                readonly
               />
             </label>
 
@@ -554,37 +561,6 @@
           </div>
         </section>
 
-        <section class="space-y-4">
-          <h4 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.sections.models') }}</h4>
-          <div class="grid gap-4 md:grid-cols-2">
-            <label class="field-wrap">
-              <span>{{ t('researchDrawing.labels.mainModelName') }}</span>
-              <select v-model="form.research_drawing_main_model_name" class="input">
-                <option
-                  v-for="option in mainModelOptions"
-                  :key="option.value"
-                  :value="option.value"
-                >
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-
-            <label class="field-wrap">
-              <span>{{ t('researchDrawing.labels.imageGenModelName') }}</span>
-              <select v-model="form.research_drawing_image_gen_model_name" class="input">
-                <option
-                  v-for="option in imageModelOptions"
-                  :key="option.value"
-                  :value="option.value"
-                >
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-          </div>
-        </section>
-
         <div class="flex flex-wrap gap-3">
           <button class="btn btn-primary" type="submit" :disabled="saving">
             {{ saving ? t('common.saving') : t('common.save') }}
@@ -600,7 +576,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { SystemSettings, UpdateSettingsRequest } from '@/api/admin/settings'
@@ -662,26 +638,18 @@ const DEFAULT_EXAMPLE_METHOD = `## 方法：PaperVizAgent 框架
 const DEFAULT_EXAMPLE_CAPTION =
   '图 1：PaperVizAgent 框架概览。给定源文本上下文和表达意图后，系统首先检索相关参考示例，并合成经过风格优化的描述。随后通过可视化与评审循环进行多轮细化，最终生成学术图。'
 
+const GEMINI_IMAGE_MODEL = 'openrouter/google/gemini-3.1-flash-image-preview'
+const DEFAULT_MAIN_MODEL = 'openrouter/google/gemini-3-flash-preview'
 const GPT_IMAGE_2_MODEL = 'gpt-image-2'
-const GPT_5_5_MODEL = 'gpt-5.5'
-
-const mainModelOptions = [
-  {
-    label: 'Gemini 3 Flash Preview',
-    value: 'openrouter/google/gemini-3-flash-preview',
-  },
-  {
-    label: 'GPT-5.5',
-    value: GPT_5_5_MODEL,
-  },
-]
-
-const allowedMainModelValues = new Set(mainModelOptions.map((option) => option.value))
+const MODEL_UNIT_PRICES: Record<string, number> = {
+  [GEMINI_IMAGE_MODEL]: 2.99,
+  [GPT_IMAGE_2_MODEL]: 0.99,
+}
 
 const imageModelOptions = [
   {
     label: 'Gemini 3.1 Flash Image Preview',
-    value: 'openrouter/google/gemini-3.1-flash-image-preview',
+    value: GEMINI_IMAGE_MODEL,
   },
   {
     label: 'GPT Image 2',
@@ -698,8 +666,8 @@ const RESEARCH_DRAWING_DEFAULTS: ResearchDrawingForm = {
   research_drawing_num_candidates: 1,
   research_drawing_aspect_ratio: '16:9',
   research_drawing_max_critic_rounds: 2,
-  research_drawing_main_model_name: 'openrouter/google/gemini-3-flash-preview',
-  research_drawing_image_gen_model_name: 'openrouter/google/gemini-3.1-flash-image-preview',
+  research_drawing_main_model_name: DEFAULT_MAIN_MODEL,
+  research_drawing_image_gen_model_name: GEMINI_IMAGE_MODEL,
   research_drawing_max_refine_resolution: '2K',
   research_drawing_unit_price: 2.99,
 }
@@ -741,13 +709,11 @@ const generationInput = reactive<PaperBananaGenerationInput>({
   ...PAPERBANANA_INPUT_DEFAULTS,
 })
 
-const isDirectGPTMode = computed(
-  () =>
-    form.research_drawing_main_model_name === GPT_5_5_MODEL ||
-    form.research_drawing_image_gen_model_name === GPT_IMAGE_2_MODEL,
-)
-const isCustomGenerationMode = computed(() => generationInput.generationMode === 'custom' && !isDirectGPTMode.value)
-const showPaperBananaParameters = computed(() => isCustomGenerationMode.value)
+const isDirectGPTMode = computed(() => form.research_drawing_image_gen_model_name === GPT_IMAGE_2_MODEL)
+const canUseCustomGenerationMode = computed(() => form.research_drawing_image_gen_model_name === GEMINI_IMAGE_MODEL)
+const isCustomGenerationMode = computed(() => generationInput.generationMode === 'custom' && canUseCustomGenerationMode.value)
+const showPaperBananaParameters = computed(() => canUseCustomGenerationMode.value && isCustomGenerationMode.value)
+const selectedUnitPrice = computed(() => MODEL_UNIT_PRICES[form.research_drawing_image_gen_model_name] ?? MODEL_UNIT_PRICES[GEMINI_IMAGE_MODEL])
 const selectedPreviewImage = computed(() => selectedResultImage.value || runHistoryImages.value[0] || null)
 
 const quotaNeed = computed(() => {
@@ -758,6 +724,8 @@ const quotaNeed = computed(() => {
   const criticRounds = Math.max(1, Number(form.research_drawing_max_critic_rounds) || 1)
   return candidates * (1 + criticRounds)
 })
+
+const unitPriceText = computed(() => `${selectedUnitPrice.value.toFixed(2)} / generation`)
 
 const runSteps = computed(() => [
   t('researchDrawing.run.steps.validate'),
@@ -841,21 +809,16 @@ function normalizeFormValues() {
     5,
     Math.max(1, Number(form.research_drawing_max_critic_rounds) || RESEARCH_DRAWING_DEFAULTS.research_drawing_max_critic_rounds),
   )
-  form.research_drawing_unit_price = Math.max(
-    0.01,
-    Number(form.research_drawing_unit_price) || RESEARCH_DRAWING_DEFAULTS.research_drawing_unit_price,
-  )
-
-  form.research_drawing_main_model_name =
-    form.research_drawing_main_model_name?.trim() || RESEARCH_DRAWING_DEFAULTS.research_drawing_main_model_name
-  if (!allowedMainModelValues.has(form.research_drawing_main_model_name)) {
-    form.research_drawing_main_model_name = RESEARCH_DRAWING_DEFAULTS.research_drawing_main_model_name
-  }
+  form.research_drawing_main_model_name = DEFAULT_MAIN_MODEL
   form.research_drawing_image_gen_model_name =
     form.research_drawing_image_gen_model_name?.trim() || RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
   if (!allowedImageModelValues.has(form.research_drawing_image_gen_model_name)) {
     form.research_drawing_image_gen_model_name = RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
   }
+  if (!canUseCustomGenerationMode.value) {
+    generationInput.generationMode = 'default'
+  }
+  form.research_drawing_unit_price = selectedUnitPrice.value
 }
 
 function applySettings(settings: SystemSettings) {
@@ -865,10 +828,10 @@ function applySettings(settings: SystemSettings) {
   form.research_drawing_num_candidates = settings.research_drawing_num_candidates || RESEARCH_DRAWING_DEFAULTS.research_drawing_num_candidates
   form.research_drawing_aspect_ratio = settings.research_drawing_aspect_ratio || RESEARCH_DRAWING_DEFAULTS.research_drawing_aspect_ratio
   form.research_drawing_max_critic_rounds = settings.research_drawing_max_critic_rounds || RESEARCH_DRAWING_DEFAULTS.research_drawing_max_critic_rounds
-  form.research_drawing_main_model_name = settings.research_drawing_main_model_name || RESEARCH_DRAWING_DEFAULTS.research_drawing_main_model_name
+  form.research_drawing_main_model_name = DEFAULT_MAIN_MODEL
   form.research_drawing_image_gen_model_name = settings.research_drawing_image_gen_model_name || RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
   form.research_drawing_max_refine_resolution = settings.research_drawing_max_refine_resolution || RESEARCH_DRAWING_DEFAULTS.research_drawing_max_refine_resolution
-  form.research_drawing_unit_price = settings.research_drawing_unit_price || RESEARCH_DRAWING_DEFAULTS.research_drawing_unit_price
+  form.research_drawing_unit_price = selectedUnitPrice.value
   normalizeFormValues()
 }
 
@@ -889,6 +852,17 @@ function resetGenerationInput() {
   stopRunPolling()
 }
 
+watch(
+  () => form.research_drawing_image_gen_model_name,
+  () => {
+    if (!canUseCustomGenerationMode.value) {
+      generationInput.generationMode = 'default'
+    }
+    form.research_drawing_main_model_name = DEFAULT_MAIN_MODEL
+    form.research_drawing_unit_price = selectedUnitPrice.value
+  },
+)
+
 async function startGenerationPreview() {
   if (!generationInput.methodContent.trim()) {
     appStore.showWarning(t('researchDrawing.input.validationRequired'))
@@ -908,9 +882,9 @@ async function startGenerationPreview() {
       caption: generationInput.caption,
       optimize_method_content: false,
       generation_mode: isDirectGPTMode.value ? 'default' : generationInput.generationMode,
-      main_model_name: form.research_drawing_main_model_name,
+      main_model_name: DEFAULT_MAIN_MODEL,
       image_gen_model_name: form.research_drawing_image_gen_model_name,
-      ...(isCustomGenerationMode.value && !isDirectGPTMode.value
+      ...(showPaperBananaParameters.value
         ? {
             exp_mode: form.research_drawing_exp_mode,
             retrieval_setting: form.research_drawing_retrieval_setting,
@@ -1114,10 +1088,10 @@ async function saveSettings() {
       research_drawing_num_candidates: form.research_drawing_num_candidates,
       research_drawing_aspect_ratio: form.research_drawing_aspect_ratio,
       research_drawing_max_critic_rounds: form.research_drawing_max_critic_rounds,
-      research_drawing_main_model_name: form.research_drawing_main_model_name,
+      research_drawing_main_model_name: DEFAULT_MAIN_MODEL,
       research_drawing_image_gen_model_name: form.research_drawing_image_gen_model_name,
       research_drawing_max_refine_resolution: form.research_drawing_max_refine_resolution,
-      research_drawing_unit_price: form.research_drawing_unit_price,
+      research_drawing_unit_price: selectedUnitPrice.value,
     }
 
     const updated = await adminAPI.settings.updateSettings(payload)

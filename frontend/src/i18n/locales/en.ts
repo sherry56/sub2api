@@ -5815,12 +5815,12 @@ export default {
     kicker: '',
     description: 'A dedicated pre-trained model for automated academic figure design.',
     topNote: 'One-click SCI-color paper framework and statistical figures',
-    unitPriceNote: 'Unit price: ¥2.99 / generation',
+    unitPriceNote: 'Price is based on the selected image model',
     userHero: {
       title: 'Pre-trained Model for Scientific Figure Design',
       subtitle: 'Generate SCI-style paper framework diagrams, mechanism workflows, and statistical figures in one click',
       description: 'Built for manuscript writing, project reporting, and academic presentation scenarios, with research color palettes, academic layouts, and figure expression conventions to quickly create clear, professional visuals for papers and PPT decks.',
-      price: 'Unit price: ¥2.99 / generation',
+      price: 'Price is based on the selected image model',
       badges: {
         research: 'Research-focused',
         sci: 'SCI palette',
@@ -5934,7 +5934,6 @@ export default {
     sections: {
       pipeline: 'Pipeline Settings',
       generation: 'Generation Settings',
-      models: 'Model Settings',
     },
     labels: {
       expMode: 'Mode',
@@ -5943,10 +5942,7 @@ export default {
       aspectRatio: 'Aspect Ratio',
       maxCriticRounds: 'Critic Rounds',
       maxRefineResolution: 'Max Refine Resolution',
-      mainModelName: 'Main Model',
       imageGenModelName: 'Image Generation Model',
-      gptImageAPIKey: 'GPT API Key',
-      gptImageBaseURL: 'GPT Base URL',
       unitPrice: 'Unit Price',
     },
     options: {
@@ -5964,7 +5960,6 @@ export default {
       none: 'none',
     },
     placeholders: {
-      mainModelName: 'Fallback to default when empty',
       imageGenModelName: 'Fallback to default when empty',
     },
     resetDefaults: 'Reset to defaults',

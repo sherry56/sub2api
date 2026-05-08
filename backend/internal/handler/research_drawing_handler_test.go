@@ -2,7 +2,12 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -89,6 +94,10 @@ func TestResearchDrawingGPTImage2UsesDirectModeConfigFromSettings(t *testing.T) 
 	if !req.isDirectGPTMode() {
 		t.Fatal("gpt-image-2 must use direct GPT mode instead of PaperBanana")
 	}
+	req.forceDirectGPTMode()
+	if req.NumCandidates != 1 || req.MaxCriticRounds != 0 || req.RetrievalSetting != "none" {
+		t.Fatalf("direct image mode did not collapse PaperBanana parameters: candidates=%d rounds=%d retrieval=%q", req.NumCandidates, req.MaxCriticRounds, req.RetrievalSetting)
+	}
 
 	cfg, err := handler.researchDrawingDirectGPTConfig(context.Background(), req)
 	if err != nil {
@@ -102,44 +111,104 @@ func TestResearchDrawingGPTImage2UsesDirectModeConfigFromSettings(t *testing.T) 
 	}
 }
 
-func TestResearchDrawingGPT55ForcesGPTImage2DirectMode(t *testing.T) {
+func TestResearchDrawingGPTImage2IgnoresGPT55MainModel(t *testing.T) {
 	t.Setenv("GPT_API_KEY", "")
 	t.Setenv("GPT_BASE_URL", "")
 	t.Setenv("GPT_IMAGE_API_KEY", "")
 	t.Setenv("GPT_IMAGE_BASE_URL", "")
+	t.Setenv("RESEARCH_DRAWING_DIRECT_RESULTS_DIR", t.TempDir())
 
-	settingSvc := service.NewSettingService(&researchDrawingSettingRepoStub{values: map[string]string{
-		service.SettingKeyResearchDrawingGPTImageAPIKey:  "sk-from-settings",
-		service.SettingKeyResearchDrawingGPTImageBaseURL: "https://openai.example/v1",
-	}}, &config.Config{})
-	handler := NewResearchDrawingHandler(nil, settingSvc)
+	textRequests := 0
+	imageRequests := 0
+	const pngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mNggAAAAAMAASsJTYQAAAAASUVORK5CYII="
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/chat/completions":
+			textRequests++
+			http.Error(w, "text model must not be called", http.StatusInternalServerError)
+		case "/images/generations":
+			imageRequests++
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Errorf("decode image request payload: %v", err)
+				http.Error(w, "bad json", http.StatusBadRequest)
+				return
+			}
+			if payload["model"] != researchDrawingGPTImage2ModelName {
+				t.Errorf("image model = %v, want %s", payload["model"], researchDrawingGPTImage2ModelName)
+			}
+			prompt, _ := payload["prompt"].(string)
+			if !strings.Contains(prompt, "raw method content") || !strings.Contains(prompt, "raw caption") {
+				t.Errorf("prompt = %q, want raw method content and caption", prompt)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": pngB64}},
+			})
+		default:
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	handler := NewResearchDrawingHandler(nil, nil)
+	handler.httpClient = server.Client()
 
 	req := ResearchDrawingGenerateRequest{
-		MethodContent:     "method",
+		MethodContent:     "raw method content",
+		Caption:           "raw caption",
 		MainModelName:     researchDrawingGPT55ModelName,
-		ImageGenModelName: researchDrawingDefaultImageModelName,
+		ImageGenModelName: researchDrawingGPTImage2ModelName,
 		NumCandidates:     8,
 		MaxCriticRounds:   5,
 		RetrievalSetting:  "manual",
 	}
 	req.normalize()
 	if !req.isDirectGPTMode() {
-		t.Fatal("gpt-5.5 must use direct GPT mode instead of PaperBanana")
+		t.Fatal("gpt-image-2 must use direct GPT mode even when main model is gpt-5.5")
 	}
 	req.forceDirectGPTMode()
-
-	if req.ImageGenModelName != researchDrawingGPTImage2ModelName {
-		t.Fatalf("ImageGenModelName = %q, want %q", req.ImageGenModelName, researchDrawingGPTImage2ModelName)
-	}
-	if req.NumCandidates != 1 || req.MaxCriticRounds != 1 || req.RetrievalSetting != "none" {
-		t.Fatalf("direct mode did not collapse PaperBanana parameters: candidates=%d rounds=%d retrieval=%q", req.NumCandidates, req.MaxCriticRounds, req.RetrievalSetting)
+	if req.NumCandidates != 1 || req.MaxCriticRounds != 0 || req.RetrievalSetting != "none" {
+		t.Fatalf("direct image mode did not collapse PaperBanana parameters: candidates=%d rounds=%d retrieval=%q", req.NumCandidates, req.MaxCriticRounds, req.RetrievalSetting)
 	}
 
-	cfg, err := handler.researchDrawingDirectGPTConfig(context.Background(), req)
-	if err != nil {
-		t.Fatalf("researchDrawingDirectGPTConfig returned error: %v", err)
+	jobID := "job-test-gpt-image-2"
+	handler.jobs[jobID] = researchDrawingJobCharge{
+		UserID:    1,
+		Direct:    true,
+		Status:    "running",
+		StartedAt: time.Now(),
+		Images:    make(map[int]researchDrawingDirectImage),
 	}
-	if cfg.TextAPIKey != "sk-from-settings" || cfg.ImageAPIKey != "sk-from-settings" {
-		t.Fatalf("cfg keys = text:%q image:%q, want settings key for both", cfg.TextAPIKey, cfg.ImageAPIKey)
+	handler.runDirectGPTResearchDrawingJob(jobID, req, researchDrawingDirectGPTConfig{
+		ImageAPIKey:  "sk-image",
+		ImageBaseURL: server.URL,
+	})
+
+	if textRequests != 0 {
+		t.Fatalf("text model requests = %d, want 0", textRequests)
+	}
+	if imageRequests != 1 {
+		t.Fatalf("image generation requests = %d, want 1", imageRequests)
+	}
+	job := handler.jobs[jobID]
+	if job.Status != "done" {
+		t.Fatalf("job status = %q, error = %q, want done", job.Status, job.Error)
+	}
+	if _, ok := job.Images[0]; !ok {
+		t.Fatal("candidate_0 image was not saved on the direct job")
+	}
+}
+
+func TestResearchDrawingGeminiImageModelKeepsPaperBananaPath(t *testing.T) {
+	req := ResearchDrawingGenerateRequest{
+		MethodContent:     "method",
+		MainModelName:     researchDrawingGPT55ModelName,
+		ImageGenModelName: researchDrawingDefaultImageModelName,
+	}
+	req.normalize()
+	if req.isDirectGPTMode() {
+		t.Fatal("Gemini/OpenRouter image model must stay on the PaperBanana path even when the main model is gpt-5.5")
 	}
 }
