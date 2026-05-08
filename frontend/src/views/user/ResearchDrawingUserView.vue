@@ -25,8 +25,9 @@
               </p>
             </div>
 
-            <div v-if="isAdmin" class="w-fit rounded-lg bg-primary-100 px-3 py-2 shadow-sm dark:bg-primary-900/40 lg:justify-self-end">
-              <p class="text-xs font-semibold text-primary-800 dark:text-primary-100">{{ t('researchDrawing.userHero.price') }}</p>
+            <div class="w-fit rounded-lg bg-primary-100 px-3 py-2 shadow-sm dark:bg-primary-900/40 lg:justify-self-end">
+              <p class="text-xs font-semibold text-primary-800 dark:text-primary-100">{{ t('researchDrawing.userHero.priceGptImage2') }}</p>
+              <p class="mt-1 text-xs font-semibold text-primary-800 dark:text-primary-100">{{ t('researchDrawing.userHero.priceNanoBanana2') }}</p>
             </div>
           </div>
 
@@ -108,14 +109,6 @@
             <h5 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.sections.generation') }}</h5>
             <div class="grid gap-4 lg:grid-cols-3">
               <label class="field-wrap">
-                <span>{{ t('researchDrawing.input.generationMode') }}</span>
-                <select v-model="generationInput.generationMode" class="input">
-                  <option value="default">{{ t('researchDrawing.input.defaultMode') }}</option>
-                  <option value="custom" :disabled="!canUseCustomGenerationMode">{{ t('researchDrawing.input.customMode') }}</option>
-                </select>
-              </label>
-
-              <label class="field-wrap">
                 <span>{{ t('researchDrawing.labels.imageGenModelName') }}</span>
                 <select v-model="form.research_drawing_image_gen_model_name" class="input">
                   <option
@@ -126,9 +119,14 @@
                     {{ option.label }}
                   </option>
                 </select>
-                <span v-if="isDirectGPTMode" class="text-xs text-emerald-600 dark:text-emerald-300">
-                  快速直连模式
-                </span>
+              </label>
+
+              <label class="field-wrap">
+                <span>{{ t('researchDrawing.input.generationMode') }}</span>
+                <select v-model="generationInput.generationMode" class="input">
+                  <option value="default">{{ t('researchDrawing.input.defaultMode') }}</option>
+                  <option value="custom" :disabled="!canUseCustomGenerationMode">{{ t('researchDrawing.input.customMode') }}</option>
+                </select>
               </label>
 
               <label class="field-wrap">
@@ -142,13 +140,6 @@
               class="rounded-lg bg-primary-50 p-3 text-sm text-primary-700 dark:bg-primary-950/30 dark:text-primary-300"
             >
               {{ t('researchDrawing.input.customModeHint') }}
-            </p>
-
-            <p
-              v-if="isDirectGPTMode"
-              class="rounded-lg bg-emerald-50 p-3 text-sm font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
-            >
-              快速直连模式
             </p>
 
             <div v-if="showPaperBananaParameters" class="space-y-4">
@@ -212,9 +203,6 @@
             <button class="btn btn-primary" type="submit" :disabled="runSubmitting">
               {{ runSubmitting ? t('common.processing') : t('researchDrawing.run.start') }}
             </button>
-            <button class="btn btn-secondary" type="button" @click="appStore.showInfo(t('researchDrawing.run.applyQuotaHint'))">
-              {{ t('researchDrawing.run.applyQuota') }}
-            </button>
             <button class="btn btn-secondary" type="button" @click="resetGenerationInput">
               {{ t('common.reset') }}
             </button>
@@ -240,9 +228,9 @@
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ unitPriceText }}</dd>
             </div>
             <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
-              <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.input.generationMode') }}</dt>
+              <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('researchDrawing.labels.imageGenModelName') }}</dt>
               <dd class="mt-1 font-semibold text-gray-900 dark:text-white">
-                {{ isDirectGPTMode ? '快速直连模式' : (isCustomGenerationMode ? t('researchDrawing.input.customMode') : t('researchDrawing.input.defaultMode')) }}
+                {{ displayModelName(form.research_drawing_image_gen_model_name) }}
               </dd>
             </div>
             <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
@@ -353,14 +341,11 @@
           <p v-else>{{ t('researchDrawing.run.emptyResults') }}</p>
         </div>
 
-        <div v-if="runHistoryImages.length" class="space-y-2">
+        <div class="space-y-2">
           <div class="flex items-center justify-between gap-3">
-            <h5 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.run.sessionHistoryTitle') }}</h5>
-            <span class="text-xs text-gray-500 dark:text-dark-400">
-              {{ t('researchDrawing.run.sessionHistoryLimit', { count: RUN_HISTORY_LIMIT }) }}
-            </span>
+            <h5 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('researchDrawing.run.generationHistoryTitle') }}</h5>
           </div>
-          <div class="flex gap-3 overflow-x-auto pb-1">
+          <div v-if="runHistoryImages.length" class="flex gap-3 overflow-x-auto pb-1">
             <article
               v-for="image in runHistoryImages"
               :key="getResultImageKey(image)"
@@ -376,17 +361,11 @@
                   :alt="t('researchDrawing.run.resultAlt', { id: image.candidateId + 1 })"
                 />
                 <span class="block space-y-1 px-3 py-2">
-                  <span class="block text-xs font-semibold text-gray-800 dark:text-dark-100">
-                    {{ t('researchDrawing.run.candidateLabel', { id: image.candidateId + 1 }) }}
-                  </span>
                   <span class="block text-[11px] leading-4 text-gray-500 dark:text-dark-400">
                     {{ formatGeneratedAt(image.generatedAt) }}
                   </span>
-                  <span class="block truncate text-[11px] leading-4 text-gray-400 dark:text-dark-500">
-                    任务 ID：{{ image.jobId }}
-                  </span>
-                  <span class="block text-[11px] leading-4 text-gray-400 dark:text-dark-500">
-                    候选图 ID：{{ image.candidateId }}
+                  <span class="block truncate text-[11px] leading-4 text-gray-500 dark:text-dark-400">
+                    {{ displayModelName(image.model) }}
                   </span>
                 </span>
               </button>
@@ -401,6 +380,12 @@
                 </button>
               </div>
             </article>
+          </div>
+          <div
+            v-else
+            class="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-500 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-400"
+          >
+            {{ t('researchDrawing.run.generationHistoryEmpty') }}
           </div>
         </div>
           </section>
@@ -509,9 +494,6 @@
                   {{ option.label }}
                 </option>
               </select>
-              <span v-if="isDirectGPTMode" class="text-xs text-emerald-600 dark:text-emerald-300">
-                快速直连模式
-              </span>
             </label>
 
             <label class="field-wrap">
@@ -607,6 +589,18 @@ type RunResultImage = {
   paperBananaUser?: string
   generatedAt: string
   url: string
+  downloadUrl: string
+  model: string
+}
+
+type StoredRunHistoryImage = {
+  job_id: string
+  candidate_id: number
+  image_url?: string
+  image_data_url?: string
+  download_url: string
+  model: string
+  created_at: string
 }
 
 const DEFAULT_EXAMPLE_METHOD = `## 方法：PaperVizAgent 框架
@@ -634,6 +628,8 @@ const DEFAULT_EXAMPLE_CAPTION =
 
 const GEMINI_IMAGE_MODEL = 'openrouter/google/gemini-3.1-flash-image-preview'
 const GPT_IMAGE_2_MODEL = 'gpt-image-2'
+const RUN_HISTORY_STORAGE_KEY = 'research_drawing_history'
+const RUN_HISTORY_LIMIT = 20
 const MODEL_UNIT_PRICES: Record<string, number> = {
   [GEMINI_IMAGE_MODEL]: 2.99,
   [GPT_IMAGE_2_MODEL]: 0.99,
@@ -641,7 +637,7 @@ const MODEL_UNIT_PRICES: Record<string, number> = {
 
 const baseImageModelOptions = [
   {
-    label: 'Gemini 3.1 Flash Image Preview',
+    label: 'Nano Banana 2',
     value: GEMINI_IMAGE_MODEL,
   },
   {
@@ -689,11 +685,11 @@ const runHistoryImages = ref<RunResultImage[]>([])
 const selectedResultImage = ref<RunResultImage | null>(null)
 const largePreviewImage = ref<RunResultImage | null>(null)
 const downloadingImageKey = ref('')
+const runImageModelName = ref('')
 let runPollTimer: number | null = null
 let exampleCarouselTimer: number | null = null
 const exampleSlideIndex = ref(0)
 const isAdmin = computed(() => authStore.isAdmin)
-const RUN_HISTORY_LIMIT = 10
 
 const form = reactive<ResearchDrawingForm>({
   ...RESEARCH_DRAWING_DEFAULTS,
@@ -713,6 +709,10 @@ const isCustomGenerationMode = computed(() => generationInput.generationMode ===
 const showPaperBananaParameters = computed(() => canUseCustomGenerationMode.value && isCustomGenerationMode.value)
 const selectedUnitPrice = computed(() => MODEL_UNIT_PRICES[form.research_drawing_image_gen_model_name] ?? MODEL_UNIT_PRICES[GEMINI_IMAGE_MODEL])
 
+function displayModelName(model: string) {
+  return baseImageModelOptions.find((option) => option.value === model)?.label || model || '-'
+}
+
 const quotaNeed = computed(() => {
   if (isDirectGPTMode.value) {
     return 1
@@ -722,7 +722,7 @@ const quotaNeed = computed(() => {
   return candidates * (1 + criticRounds)
 })
 
-const unitPriceText = computed(() => `${selectedUnitPrice.value.toFixed(2)} / generation`)
+const unitPriceText = computed(() => selectedUnitPrice.value.toFixed(2))
 
 const runStatusText = computed(() => {
   if (!runJobId.value) {
@@ -768,7 +768,7 @@ const runStatusTone = computed(() => {
   return 'bg-gray-100 text-gray-500 dark:bg-dark-800 dark:text-dark-400'
 })
 
-const selectedPreviewImage = computed(() => selectedResultImage.value || runHistoryImages.value[0] || null)
+const selectedPreviewImage = computed(() => selectedResultImage.value || runResultImages.value[0] || null)
 
 const exampleCards = computed(() => [
   {
@@ -887,6 +887,7 @@ function resetGenerationInput() {
   runPaperBananaUser.value = ''
   runJobStatus.value = null
   runImageLoading.value = false
+  runImageModelName.value = ''
   selectedResultImage.value = null
   largePreviewImage.value = null
   runResultImages.value = []
@@ -914,6 +915,7 @@ async function startGenerationPreview() {
   runJobStatus.value = { status: 'running' }
   selectedResultImage.value = null
   runResultImages.value = []
+  runImageModelName.value = form.research_drawing_image_gen_model_name
   stopRunPolling()
   try {
     const payload: ResearchDrawingGenerateRequest = {
@@ -997,6 +999,32 @@ function getCandidateIds(status: ResearchDrawingJobStatus) {
   return Array.from({ length: count }, (_, index) => index)
 }
 
+function buildResearchDrawingImagePath(jobId: string, candidateId: number, paperBananaUser?: string) {
+  const path = `/research-drawing/jobs/${encodeURIComponent(jobId)}/images/${encodeURIComponent(String(candidateId))}`
+  if (!paperBananaUser) {
+    return path
+  }
+  return `${path}?paperbanana_user=${encodeURIComponent(paperBananaUser)}`
+}
+
+function extractPaperBananaUserFromDownloadUrl(downloadUrl: string) {
+  try {
+    const url = new URL(downloadUrl, window.location.origin)
+    return url.searchParams.get('paperbanana_user') || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('Failed to read image data'))
+    reader.readAsDataURL(blob)
+  })
+}
+
 async function loadRunImages(status: ResearchDrawingJobStatus) {
   const candidateIds = getCandidateIds(status)
   if (!runJobId.value || candidateIds.length === 0) {
@@ -1007,14 +1035,18 @@ async function loadRunImages(status: ResearchDrawingJobStatus) {
   try {
     const images: RunResultImage[] = []
     const generatedAt = new Date().toISOString()
+    const model = runImageModelName.value || form.research_drawing_image_gen_model_name
     for (const candidateId of candidateIds) {
       const blob = await researchDrawingAPI.getJobImage(runJobId.value, candidateId, runPaperBananaUser.value)
+      const imageDataUrl = await blobToDataUrl(blob)
       images.push({
         jobId: runJobId.value,
         candidateId,
         paperBananaUser: runPaperBananaUser.value,
         generatedAt,
-        url: URL.createObjectURL(blob),
+        url: imageDataUrl,
+        downloadUrl: buildResearchDrawingImagePath(runJobId.value, candidateId, runPaperBananaUser.value),
+        model,
       })
     }
     runResultImages.value = images
@@ -1027,7 +1059,6 @@ async function loadRunImages(status: ResearchDrawingJobStatus) {
 }
 
 function revokeRunImages() {
-  runHistoryImages.value.forEach((image) => URL.revokeObjectURL(image.url))
   runHistoryImages.value = []
   runResultImages.value = []
   largePreviewImage.value = null
@@ -1045,9 +1076,71 @@ function closeLargePreview() {
 function appendRunHistory(images: RunResultImage[]) {
   const next = [...images, ...runHistoryImages.value]
   const kept = next.slice(0, RUN_HISTORY_LIMIT)
-  next.slice(RUN_HISTORY_LIMIT).forEach((image) => URL.revokeObjectURL(image.url))
   runHistoryImages.value = kept
   selectedResultImage.value = images[0] || kept[0] || null
+  saveRunHistory()
+}
+
+function loadRunHistory() {
+  try {
+    const raw = localStorage.getItem(RUN_HISTORY_STORAGE_KEY)
+    if (!raw) {
+      runHistoryImages.value = []
+      return
+    }
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) {
+      runHistoryImages.value = []
+      return
+    }
+    runHistoryImages.value = parsed
+      .map((item): RunResultImage | null => {
+        const jobId = typeof item?.job_id === 'string' ? item.job_id : ''
+        const candidateId = Number(item?.candidate_id)
+        const url = typeof item?.image_data_url === 'string'
+          ? item.image_data_url
+          : (typeof item?.image_url === 'string' ? item.image_url : '')
+        const downloadUrl = typeof item?.download_url === 'string' ? item.download_url : ''
+        const model = typeof item?.model === 'string' ? item.model : ''
+        const generatedAt = typeof item?.created_at === 'string' ? item.created_at : ''
+        if (!jobId || !Number.isInteger(candidateId) || candidateId < 0 || !url || url.startsWith('blob:') || !downloadUrl || !generatedAt) {
+          return null
+        }
+        return {
+          jobId,
+          candidateId,
+          paperBananaUser: extractPaperBananaUserFromDownloadUrl(downloadUrl),
+          generatedAt,
+          url,
+          downloadUrl,
+          model,
+        }
+      })
+      .filter((image): image is RunResultImage => Boolean(image))
+      .slice(0, RUN_HISTORY_LIMIT)
+  } catch {
+    runHistoryImages.value = []
+  }
+}
+
+function saveRunHistory() {
+  const records: StoredRunHistoryImage[] = runHistoryImages.value
+    .filter((image) => image.url && !image.url.startsWith('blob:'))
+    .slice(0, RUN_HISTORY_LIMIT)
+    .map((image) => ({
+      job_id: image.jobId,
+      candidate_id: image.candidateId,
+      image_data_url: image.url.startsWith('data:') ? image.url : undefined,
+      image_url: image.url.startsWith('data:') ? undefined : image.url,
+      download_url: image.downloadUrl,
+      model: image.model,
+      created_at: image.generatedAt,
+    }))
+  try {
+    localStorage.setItem(RUN_HISTORY_STORAGE_KEY, JSON.stringify(records))
+  } catch {
+    // Ignore storage quota or privacy-mode failures; current page results remain usable.
+  }
 }
 
 function getResultImageKey(image: RunResultImage) {
@@ -1070,7 +1163,11 @@ async function downloadResultImage(image: RunResultImage) {
   downloadingImageKey.value = key
   try {
     // TODO(research-drawing): switch this to the real PaperBanana 2K export endpoint when it is exposed.
-    const blob = await researchDrawingAPI.getJobImage(image.jobId, image.candidateId, image.paperBananaUser)
+    const blob = await researchDrawingAPI.getJobImage(
+      image.jobId,
+      image.candidateId,
+      image.paperBananaUser || extractPaperBananaUserFromDownloadUrl(image.downloadUrl),
+    )
     const objectUrl = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = objectUrl
@@ -1141,6 +1238,7 @@ async function saveSettings() {
 }
 
 onMounted(async () => {
+  loadRunHistory()
   await appStore.fetchPublicSettings()
   loadSettings()
   startExampleCarousel()
