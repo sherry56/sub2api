@@ -64,10 +64,10 @@ type researchDrawingDirectImage struct {
 }
 
 type researchDrawingDirectGPTConfig struct {
-	ImageAPIKey    string
-	ImageBaseURL   string
-	KeySource      string
-	BaseURLSource  string
+	ImageAPIKey   string
+	ImageBaseURL  string
+	KeySource     string
+	BaseURLSource string
 }
 
 type ResearchDrawingGenerateRequest struct {
