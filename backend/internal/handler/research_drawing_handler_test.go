@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/model"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -72,6 +73,28 @@ func (r *researchDrawingSettingRepoStub) Delete(ctx context.Context, key string)
 	return nil
 }
 
+type researchDrawingImage2RecordRepoStub struct {
+	records []model.ResearchDrawingImage2Record
+}
+
+func (r *researchDrawingImage2RecordRepoStub) CreateResearchDrawingImage2Record(ctx context.Context, record model.ResearchDrawingImage2Record) error {
+	r.records = append(r.records, record)
+	return nil
+}
+
+func (r *researchDrawingImage2RecordRepoStub) ListResearchDrawingImage2Records(ctx context.Context, userID int64, limit int) ([]model.ResearchDrawingImage2Record, error) {
+	return r.records, nil
+}
+
+func (r *researchDrawingImage2RecordRepoStub) GetResearchDrawingImage2Record(ctx context.Context, userID int64, jobID string) (*model.ResearchDrawingImage2Record, error) {
+	for i := range r.records {
+		if r.records[i].UserID == userID && r.records[i].JobID == jobID {
+			return &r.records[i], nil
+		}
+	}
+	return nil, nil
+}
+
 func TestResearchDrawingGPTImage2UsesDirectModeConfigFromEnv(t *testing.T) {
 	t.Setenv("GPT_API_KEY", "sk-gpt-fallback")
 	t.Setenv("GPT_BASE_URL", "https://fallback.example/v1")
@@ -82,7 +105,7 @@ func TestResearchDrawingGPTImage2UsesDirectModeConfigFromEnv(t *testing.T) {
 		service.SettingKeyResearchDrawingGPTImageAPIKey:  "sk-from-settings",
 		service.SettingKeyResearchDrawingGPTImageBaseURL: "https://api.openai.com/v1",
 	}}, &config.Config{})
-	handler := NewResearchDrawingHandler(nil, settingSvc)
+	handler := NewResearchDrawingHandler(nil, settingSvc, nil)
 
 	req := ResearchDrawingGenerateRequest{
 		MethodContent:     "method",
@@ -119,7 +142,7 @@ func TestResearchDrawingGPTImage2FallsBackToGPTEnv(t *testing.T) {
 	t.Setenv("GPT_IMAGE_API_KEY", "")
 	t.Setenv("GPT_IMAGE_BASE_URL", "")
 
-	handler := NewResearchDrawingHandler(nil, nil)
+	handler := NewResearchDrawingHandler(nil, nil, nil)
 	req := ResearchDrawingGenerateRequest{
 		MethodContent:     "method",
 		ImageGenModelName: researchDrawingGPTImage2ModelName,
@@ -151,7 +174,7 @@ func TestResearchDrawingGPTImage2DoesNotDefaultToOpenAIBaseURL(t *testing.T) {
 		service.SettingKeyResearchDrawingGPTImageAPIKey:  "sk-from-settings",
 		service.SettingKeyResearchDrawingGPTImageBaseURL: "https://api.openai.com/v1",
 	}}, &config.Config{})
-	handler := NewResearchDrawingHandler(nil, settingSvc)
+	handler := NewResearchDrawingHandler(nil, settingSvc, nil)
 	req := ResearchDrawingGenerateRequest{
 		MethodContent:     "method",
 		ImageGenModelName: researchDrawingGPTImage2ModelName,
@@ -217,7 +240,9 @@ func TestResearchDrawingGPTImage2IgnoresGPT55MainModel(t *testing.T) {
 	}))
 	defer server.Close()
 
-	handler := NewResearchDrawingHandler(nil, nil)
+	recordRepo := &researchDrawingImage2RecordRepoStub{}
+	recordSvc := service.NewResearchDrawingImage2RecordService(recordRepo)
+	handler := NewResearchDrawingHandler(nil, nil, recordSvc)
 	handler.httpClient = server.Client()
 
 	req := ResearchDrawingGenerateRequest{
@@ -262,6 +287,12 @@ func TestResearchDrawingGPTImage2IgnoresGPT55MainModel(t *testing.T) {
 	}
 	if _, ok := job.Images[0]; !ok {
 		t.Fatal("candidate_0 image was not saved on the direct job")
+	}
+	if len(recordRepo.records) != 1 {
+		t.Fatalf("image2 records = %d, want 1", len(recordRepo.records))
+	}
+	if recordRepo.records[0].UserID != 1 || recordRepo.records[0].JobID != jobID || recordRepo.records[0].Model != researchDrawingGPTImage2ModelName {
+		t.Fatalf("unexpected image2 record: %+v", recordRepo.records[0])
 	}
 }
 

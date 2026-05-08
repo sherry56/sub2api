@@ -123,6 +123,7 @@ func RegisterUserRoutes(
 		researchDrawing := authenticated.Group("/research-drawing")
 		{
 			researchDrawing.POST("/generate", h.ResearchDrawing.Generate)
+			researchDrawing.GET("/image2-records", h.ResearchDrawing.Image2Records)
 			researchDrawing.GET("/jobs/:job_id", h.ResearchDrawing.JobStatus)
 			researchDrawing.GET("/jobs/:job_id/images/:candidate_id", h.ResearchDrawing.JobImage)
 		}

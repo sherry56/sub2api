@@ -25,9 +25,9 @@
               </p>
             </div>
 
-            <div class="w-fit rounded-lg bg-primary-100 px-3 py-2 shadow-sm dark:bg-primary-900/40 lg:justify-self-end">
-              <p class="text-xs font-semibold text-primary-800 dark:text-primary-100">{{ t('researchDrawing.userHero.priceGptImage2') }}</p>
-              <p class="mt-1 text-xs font-semibold text-primary-800 dark:text-primary-100">{{ t('researchDrawing.userHero.priceNanoBanana2') }}</p>
+            <div class="w-full rounded-lg bg-primary-100 px-3 py-2 text-right shadow-sm dark:bg-primary-900/40 sm:w-fit sm:min-w-[190px] lg:justify-self-end">
+              <p class="whitespace-nowrap text-xs font-semibold leading-5 text-primary-800 dark:text-primary-100">{{ t('researchDrawing.userHero.priceGptImage2') }}</p>
+              <p class="whitespace-nowrap text-xs font-semibold leading-5 text-primary-800 dark:text-primary-100">{{ t('researchDrawing.userHero.priceNanoBanana2') }}</p>
             </div>
           </div>
 
@@ -558,7 +558,7 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { SystemSettings, UpdateSettingsRequest } from '@/api/admin/settings'
 import { researchDrawingAPI } from '@/api/researchDrawing'
-import type { ResearchDrawingGenerateRequest, ResearchDrawingJobStatus } from '@/api/researchDrawing'
+import type { ResearchDrawingGenerateRequest, ResearchDrawingImage2Record, ResearchDrawingJobStatus } from '@/api/researchDrawing'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -1074,11 +1074,27 @@ function closeLargePreview() {
 }
 
 function appendRunHistory(images: RunResultImage[]) {
-  const next = [...images, ...runHistoryImages.value]
-  const kept = next.slice(0, RUN_HISTORY_LIMIT)
+  const kept = mergeRunHistoryImages(images, runHistoryImages.value)
   runHistoryImages.value = kept
   selectedResultImage.value = images[0] || kept[0] || null
   saveRunHistory()
+}
+
+function mergeRunHistoryImages(primary: RunResultImage[], secondary: RunResultImage[]) {
+  const seen = new Set<string>()
+  const merged: RunResultImage[] = []
+  for (const image of [...primary, ...secondary]) {
+    const key = getResultImageKey(image)
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    merged.push(image)
+    if (merged.length >= RUN_HISTORY_LIMIT) {
+      break
+    }
+  }
+  return merged
 }
 
 function loadRunHistory() {
@@ -1120,6 +1136,62 @@ function loadRunHistory() {
       .slice(0, RUN_HISTORY_LIMIT)
   } catch {
     runHistoryImages.value = []
+  }
+}
+
+async function loadImage2RunHistory() {
+  try {
+    const response = await researchDrawingAPI.listImage2Records(RUN_HISTORY_LIMIT)
+    const records = Array.isArray(response.records) ? response.records : []
+    if (records.length === 0) {
+      return
+    }
+
+    const images: RunResultImage[] = []
+    for (const record of records) {
+      const image = await buildImage2RunHistoryImage(record)
+      if (image) {
+        images.push(image)
+      }
+    }
+    if (images.length === 0) {
+      return
+    }
+    runHistoryImages.value = mergeRunHistoryImages(images, runHistoryImages.value)
+    saveRunHistory()
+  } catch {
+    // Backend history is a convenience layer; localStorage remains the fallback.
+  }
+}
+
+async function buildImage2RunHistoryImage(record: ResearchDrawingImage2Record): Promise<RunResultImage | null> {
+  const jobId = typeof record.job_id === 'string' ? record.job_id : ''
+  const model = typeof record.model === 'string' ? record.model : GPT_IMAGE_2_MODEL
+  const generatedAt = typeof record.created_at === 'string' ? record.created_at : ''
+  if (!jobId || !generatedAt) {
+    return null
+  }
+
+  const candidateId = 0
+  const downloadUrl = buildResearchDrawingImagePath(jobId, candidateId)
+  let url = ''
+  try {
+    const blob = await researchDrawingAPI.getJobImage(jobId, candidateId)
+    url = await blobToDataUrl(blob)
+  } catch {
+    const cached = runHistoryImages.value.find((image) => image.jobId === jobId && image.candidateId === candidateId)
+    url = cached?.url || ''
+  }
+  if (!url || url.startsWith('blob:')) {
+    return null
+  }
+  return {
+    jobId,
+    candidateId,
+    generatedAt,
+    url,
+    downloadUrl,
+    model,
   }
 }
 
@@ -1239,6 +1311,7 @@ async function saveSettings() {
 
 onMounted(async () => {
   loadRunHistory()
+  void loadImage2RunHistory()
   await appStore.fetchPublicSettings()
   loadSettings()
   startExampleCarousel()

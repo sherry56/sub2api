@@ -39,6 +39,17 @@ export interface ResearchDrawingJobStatus {
   error?: string
 }
 
+export interface ResearchDrawingImage2Record {
+  user_id: number
+  job_id: string
+  model: string
+  created_at: string
+}
+
+export interface ResearchDrawingImage2RecordsResponse {
+  records: ResearchDrawingImage2Record[]
+}
+
 export const researchDrawingAPI = {
   async generate(payload: ResearchDrawingGenerateRequest): Promise<ResearchDrawingGenerateResponse> {
     const response = await apiClient.post('/research-drawing/generate', payload)
@@ -60,6 +71,13 @@ export const researchDrawingAPI = {
         responseType: 'blob',
       },
     )
+    return response.data
+  },
+
+  async listImage2Records(limit = 20): Promise<ResearchDrawingImage2RecordsResponse> {
+    const response = await apiClient.get('/research-drawing/image2-records', {
+      params: { limit },
+    })
     return response.data
   },
 }

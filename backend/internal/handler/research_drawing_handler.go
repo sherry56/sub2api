@@ -14,10 +14,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/model"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -33,10 +35,11 @@ const (
 )
 
 type ResearchDrawingHandler struct {
-	userService    *service.UserService
-	settingService *service.SettingService
-	httpClient     *http.Client
-	mu             sync.Mutex
+	userService         *service.UserService
+	settingService      *service.SettingService
+	image2RecordService *service.ResearchDrawingImage2RecordService
+	httpClient          *http.Client
+	mu                  sync.Mutex
 	// TODO(research-drawing): this in-memory charge map is only a short-term
 	// compatibility guard. It is lost on process restart and must be replaced
 	// with the research_drawing_jobs table for durable status/refund idempotency.
@@ -93,12 +96,17 @@ type researchDrawingGenerateResponse struct {
 	QuotaNeed       int     `json:"quota_need"`
 }
 
-func NewResearchDrawingHandler(userService *service.UserService, settingService *service.SettingService) *ResearchDrawingHandler {
+type researchDrawingImage2RecordsResponse struct {
+	Records []model.ResearchDrawingImage2Record `json:"records"`
+}
+
+func NewResearchDrawingHandler(userService *service.UserService, settingService *service.SettingService, image2RecordService *service.ResearchDrawingImage2RecordService) *ResearchDrawingHandler {
 	return &ResearchDrawingHandler{
-		userService:    userService,
-		settingService: settingService,
-		httpClient:     &http.Client{Timeout: 180 * time.Second},
-		jobs:           make(map[string]researchDrawingJobCharge),
+		userService:         userService,
+		settingService:      settingService,
+		image2RecordService: image2RecordService,
+		httpClient:          &http.Client{Timeout: 180 * time.Second},
+		jobs:                make(map[string]researchDrawingJobCharge),
 	}
 }
 
@@ -236,12 +244,18 @@ func (h *ResearchDrawingHandler) JobStatus(c *gin.Context) {
 
 	status, err := h.getPaperBananaStatus(c, subject.UserID, jobID, pbUser)
 	if err != nil {
+		h.refundJobOnce(c, subject.UserID, jobID)
 		response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "PAPERBANANA_STATUS_FAILED", err.Error()))
 		return
 	}
 
-	if strings.EqualFold(stringFromMap(status, "status"), "error") {
+	if researchDrawingStatusFailed(status) {
 		h.refundJobOnce(c, subject.UserID, jobID)
+	}
+	if researchDrawingStatusDone(status) && !researchDrawingStatusHasCandidates(status) {
+		h.refundJobOnce(c, subject.UserID, jobID)
+		status["status"] = "error"
+		status["error"] = "research drawing finished without valid images"
 	}
 	response.Success(c, status)
 }
@@ -260,7 +274,7 @@ func (h *ResearchDrawingHandler) JobImage(c *gin.Context) {
 		return
 	}
 
-	if body, contentType, handled, err := h.getDirectJobImage(subject.UserID, jobID, candidateID); handled {
+	if body, contentType, handled, err := h.getDirectJobImage(c.Request.Context(), subject.UserID, jobID, candidateID); handled {
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -274,7 +288,13 @@ func (h *ResearchDrawingHandler) JobImage(c *gin.Context) {
 
 	body, contentType, err := h.getPaperBananaImage(c, subject.UserID, jobID, candidateID, pbUser)
 	if err != nil {
+		h.refundJobOnce(c, subject.UserID, jobID)
 		response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "PAPERBANANA_IMAGE_FAILED", err.Error()))
+		return
+	}
+	if !isValidResearchDrawingImage(body, contentType) {
+		h.refundJobOnce(c, subject.UserID, jobID)
+		response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "PAPERBANANA_IMAGE_INVALID", "PaperBanana returned no valid image"))
 		return
 	}
 	if contentType == "" {
@@ -283,7 +303,43 @@ func (h *ResearchDrawingHandler) JobImage(c *gin.Context) {
 	c.Data(http.StatusOK, contentType, body)
 }
 
+func (h *ResearchDrawingHandler) Image2Records(c *gin.Context) {
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "Unauthorized")
+		return
+	}
+
+	limit := 20
+	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
+		if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	records, err := h.image2RecordService.ListByUser(c.Request.Context(), subject.UserID, limit)
+	if err != nil {
+		response.ErrorFrom(c, infraerrors.New(http.StatusInternalServerError, "RESEARCH_DRAWING_IMAGE2_RECORDS_FAILED", err.Error()))
+		return
+	}
+	response.Success(c, researchDrawingImage2RecordsResponse{Records: records})
+}
+
 func (h *ResearchDrawingHandler) refundJobOnce(c *gin.Context, userID int64, jobID string) {
+	if c == nil || c.Request == nil {
+		h.refundJobOnceWithContext(context.Background(), userID, jobID)
+		return
+	}
+	h.refundJobOnceWithContext(c.Request.Context(), userID, jobID)
+}
+
+func (h *ResearchDrawingHandler) refundJobOnceWithContext(ctx context.Context, userID int64, jobID string) {
+	if h.userService == nil {
+		return
+	}
 	h.mu.Lock()
 	charge, ok := h.jobs[jobID]
 	if !ok || charge.UserID != userID || charge.Refunded {
@@ -293,7 +349,11 @@ func (h *ResearchDrawingHandler) refundJobOnce(c *gin.Context, userID int64, job
 	charge.Refunded = true
 	h.jobs[jobID] = charge
 	h.mu.Unlock()
-	_ = h.userService.UpdateBalance(c.Request.Context(), userID, charge.Charge)
+	if err := h.userService.UpdateBalance(ctx, userID, charge.Charge); err != nil {
+		log.Printf("[ResearchDrawing] refund failed job_id=%s user_id=%d charge=%.4f error=%s", jobID, userID, charge.Charge, err.Error())
+		return
+	}
+	log.Printf("[ResearchDrawing] refunded failed generation job_id=%s user_id=%d charge=%.4f", jobID, userID, charge.Charge)
 }
 
 func (h *ResearchDrawingHandler) submitToPaperBanana(c *gin.Context, user *service.User, req ResearchDrawingGenerateRequest) (map[string]any, error) {
@@ -443,9 +503,11 @@ func (h *ResearchDrawingHandler) runDirectGPTResearchDrawingJob(jobID string, re
 		return
 	}
 
+	userID := int64(0)
 	h.mu.Lock()
 	job, ok := h.jobs[jobID]
 	if ok && job.Direct {
+		userID = job.UserID
 		if job.Images == nil {
 			job.Images = make(map[int]researchDrawingDirectImage)
 		}
@@ -461,7 +523,30 @@ func (h *ResearchDrawingHandler) runDirectGPTResearchDrawingJob(jobID string, re
 		h.jobs[jobID] = job
 	}
 	h.mu.Unlock()
+	if userID > 0 {
+		h.recordImage2Job(context.Background(), userID, jobID, researchDrawingGPTImage2ModelName)
+	}
 	log.Printf("[ResearchDrawing] direct GPT candidate image saved job_id=%s candidate_id=0 bytes=%d path=%s", jobID, len(imageBytes), outPath)
+}
+
+func (h *ResearchDrawingHandler) recordImage2Job(ctx context.Context, userID int64, jobID, modelName string) {
+	if h.image2RecordService == nil || userID <= 0 || strings.TrimSpace(jobID) == "" {
+		return
+	}
+	record := model.ResearchDrawingImage2Record{
+		UserID:    userID,
+		JobID:     strings.TrimSpace(jobID),
+		Model:     strings.TrimSpace(modelName),
+		CreatedAt: time.Now().UTC(),
+	}
+	if record.Model == "" {
+		record.Model = researchDrawingGPTImage2ModelName
+	}
+	if err := h.image2RecordService.Create(ctx, record); err != nil {
+		log.Printf("[ResearchDrawing] image2 record save failed job_id=%s user_id=%d error=%s", jobID, userID, err.Error())
+		return
+	}
+	log.Printf("[ResearchDrawing] image2 record saved job_id=%s user_id=%d model=%s", jobID, userID, record.Model)
 }
 
 func (h *ResearchDrawingHandler) generateResearchDrawingDirectImage(ctx context.Context, req ResearchDrawingGenerateRequest, imagePrompt string, cfg researchDrawingDirectGPTConfig) ([]byte, error) {
@@ -500,8 +585,8 @@ func (h *ResearchDrawingHandler) generateResearchDrawingDirectImage(ctx context.
 	if err != nil {
 		return nil, fmt.Errorf("decode data[0].b64_json: %w", err)
 	}
-	if len(imageBytes) == 0 {
-		return nil, fmt.Errorf("decode data[0].b64_json: empty image bytes")
+	if !isValidResearchDrawingImage(imageBytes, "") {
+		return nil, fmt.Errorf("decode data[0].b64_json: no valid image bytes")
 	}
 	log.Printf("[ResearchDrawing] direct GPT image parsed image_field=data[0].b64_json request_url=%s b64_len=%d decoded_bytes=%d", endpoint, len(b64JSON), len(imageBytes))
 	return imageBytes, nil
@@ -535,15 +620,20 @@ func (h *ResearchDrawingHandler) failDirectJob(jobID string, err error) {
 	if err != nil {
 		message = err.Error()
 	}
+	userID := int64(0)
 	h.mu.Lock()
 	job, ok := h.jobs[jobID]
 	if ok && job.Direct {
+		userID = job.UserID
 		job.Status = "error"
 		job.Error = message
 		job.FinishedAt = time.Now()
 		h.jobs[jobID] = job
 	}
 	h.mu.Unlock()
+	if userID > 0 {
+		h.refundJobOnceWithContext(context.Background(), userID, jobID)
+	}
 	log.Printf("[ResearchDrawing] direct GPT generation failed job_id=%s error=%s", jobID, message)
 }
 
@@ -592,12 +682,12 @@ func (h *ResearchDrawingHandler) getDirectJobStatus(userID int64, jobID string) 
 	return out, true, nil
 }
 
-func (h *ResearchDrawingHandler) getDirectJobImage(userID int64, jobID, candidateID string) ([]byte, string, bool, error) {
+func (h *ResearchDrawingHandler) getDirectJobImage(ctx context.Context, userID int64, jobID, candidateID string) ([]byte, string, bool, error) {
 	h.mu.Lock()
 	job, ok := h.jobs[jobID]
 	if !ok || !job.Direct {
 		h.mu.Unlock()
-		return nil, "", false, nil
+		return h.getPersistedDirectJobImage(ctx, userID, jobID, candidateID)
 	}
 	if job.UserID != userID {
 		h.mu.Unlock()
@@ -624,6 +714,30 @@ func (h *ResearchDrawingHandler) getDirectJobImage(userID int64, jobID, candidat
 	contentType := image.ContentType
 	h.mu.Unlock()
 	return body, contentType, true, nil
+}
+
+func (h *ResearchDrawingHandler) getPersistedDirectJobImage(ctx context.Context, userID int64, jobID, candidateID string) ([]byte, string, bool, error) {
+	if h.image2RecordService == nil {
+		return nil, "", false, nil
+	}
+	if candidateID != "0" {
+		return nil, "", false, nil
+	}
+	record, err := h.image2RecordService.GetByUserJob(ctx, userID, jobID)
+	if err != nil {
+		return nil, "", true, infraerrors.New(http.StatusInternalServerError, "RESEARCH_DRAWING_IMAGE2_RECORD_LOOKUP_FAILED", err.Error())
+	}
+	if record == nil {
+		return nil, "", false, nil
+	}
+	body, err := loadResearchDrawingDirectCandidate(jobID)
+	if err != nil {
+		return nil, "", true, infraerrors.New(http.StatusNotFound, "RESEARCH_DRAWING_IMAGE_NOT_FOUND", "research drawing image not found")
+	}
+	if !isValidResearchDrawingImage(body, "") {
+		return nil, "", true, infraerrors.New(http.StatusNotFound, "RESEARCH_DRAWING_IMAGE_NOT_FOUND", "research drawing image not found")
+	}
+	return body, "image/png", true, nil
 }
 
 func (r *ResearchDrawingGenerateRequest) normalize() {
@@ -769,6 +883,60 @@ func researchDrawingResponsePreview(body []byte) string {
 	return preview
 }
 
+func researchDrawingStatusFailed(status map[string]any) bool {
+	switch strings.ToLower(strings.TrimSpace(stringFromMap(status, "status"))) {
+	case "error", "failed", "fail", "canceled", "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+func researchDrawingStatusDone(status map[string]any) bool {
+	switch strings.ToLower(strings.TrimSpace(stringFromMap(status, "status"))) {
+	case "done", "success", "succeeded", "completed", "complete", "finished":
+		return true
+	default:
+		return false
+	}
+}
+
+func researchDrawingStatusHasCandidates(status map[string]any) bool {
+	if images, ok := status["images"].([]any); ok && len(images) > 0 {
+		return true
+	}
+	if candidateIDs, ok := status["candidate_ids"].([]any); ok && len(candidateIDs) > 0 {
+		return true
+	}
+	if count := intFromMap(status, "candidate_count"); count > 0 {
+		return true
+	}
+	return false
+}
+
+func isValidResearchDrawingImage(body []byte, contentType string) bool {
+	if len(body) == 0 {
+		return false
+	}
+	normalizedContentType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	if strings.HasPrefix(normalizedContentType, "image/") {
+		return true
+	}
+	if len(body) >= 8 && bytes.Equal(body[:8], []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}) {
+		return true
+	}
+	if len(body) >= 3 && body[0] == 0xff && body[1] == 0xd8 && body[2] == 0xff {
+		return true
+	}
+	if len(body) >= 12 && string(body[:4]) == "RIFF" && string(body[8:12]) == "WEBP" {
+		return true
+	}
+	if len(body) >= 6 && (string(body[:6]) == "GIF87a" || string(body[:6]) == "GIF89a") {
+		return true
+	}
+	return false
+}
+
 func decodeResearchDrawingImageBase64(raw string) ([]byte, error) {
 	value := strings.TrimSpace(raw)
 	if idx := strings.Index(value, ","); idx >= 0 {
@@ -778,6 +946,21 @@ func decodeResearchDrawingImageBase64(raw string) ([]byte, error) {
 }
 
 func saveResearchDrawingDirectCandidate(jobID string, imageBytes []byte) (string, error) {
+	outPath := researchDrawingDirectCandidatePath(jobID)
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(outPath, imageBytes, 0o644); err != nil {
+		return "", err
+	}
+	return outPath, nil
+}
+
+func loadResearchDrawingDirectCandidate(jobID string) ([]byte, error) {
+	return os.ReadFile(researchDrawingDirectCandidatePath(jobID))
+}
+
+func researchDrawingDirectCandidatePath(jobID string) string {
 	root := strings.TrimSpace(os.Getenv("RESEARCH_DRAWING_DIRECT_RESULTS_DIR"))
 	if root == "" {
 		if dataDir := strings.TrimSpace(os.Getenv("DATA_DIR")); dataDir != "" {
@@ -786,15 +969,7 @@ func saveResearchDrawingDirectCandidate(jobID string, imageBytes []byte) (string
 			root = filepath.Join(os.TempDir(), "sub2api-research-drawing-results")
 		}
 	}
-	jobDir := filepath.Join(root, jobID)
-	if err := os.MkdirAll(jobDir, 0o755); err != nil {
-		return "", err
-	}
-	outPath := filepath.Join(jobDir, "candidate_0.png")
-	if err := os.WriteFile(outPath, imageBytes, 0o644); err != nil {
-		return "", err
-	}
-	return outPath, nil
+	return filepath.Join(root, jobID, "candidate_0.png")
 }
 
 func newResearchDrawingJobID() string {
@@ -854,4 +1029,30 @@ func stringFromMap(m map[string]any, key string) string {
 		return ""
 	}
 	return fmt.Sprint(v)
+}
+
+func intFromMap(m map[string]any, key string) int {
+	if m == nil {
+		return 0
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return 0
+	}
+	switch typed := v.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		value, _ := typed.Int64()
+		return int(value)
+	case string:
+		value, _ := strconv.Atoi(strings.TrimSpace(typed))
+		return value
+	default:
+		return 0
+	}
 }
