@@ -1142,7 +1142,6 @@ async function saveSettings() {
 
 onMounted(async () => {
   await appStore.fetchPublicSettings()
-  applyMethodOptimizationDefault()
   loadSettings()
   startExampleCarousel()
 })
