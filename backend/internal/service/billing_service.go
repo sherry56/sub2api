@@ -237,7 +237,7 @@ func (s *BillingService) initFallbackPricing() {
 		CacheReadPricePerTokenPriority: 0.35e-6,
 		SupportsCacheBreakdown:         false,
 	}
-	// Codex 族兜底统一按 GPT-5.3 Codex 价格计费
+	// Codex 族兜底统一按 GPT 5.3 Codex 价格计费
 	s.fallbackPrices["gpt-5.3-codex"] = &ModelPricing{
 		InputPricePerToken:             1.5e-6, // $1.5 per MTok
 		InputPricePerTokenPriority:     3e-6,   // $3 per MTok

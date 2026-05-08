@@ -217,8 +217,6 @@ export interface PublicSettings {
   channel_monitor_default_interval_seconds: number
   available_channels_enabled: boolean
   affiliate_enabled: boolean
-  research_drawing_method_optimization_enabled?: boolean
-  research_drawing_method_optimization_default_enabled?: boolean
 }
 
 export interface AuthResponse {

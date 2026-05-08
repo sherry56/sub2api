@@ -109,7 +109,7 @@ describe('BulkEditAccountModal', () => {
 
     expect(wrapper.text()).toContain('3.1-Flash-Image透传')
     expect(wrapper.text()).toContain('3-Pro-Image→3.1')
-    expect(wrapper.text()).not.toContain('GPT-5.3 Codex Spark')
+    expect(wrapper.text()).not.toContain('GPT 5.3 Codex Spark')
   })
 
   it('仅勾选模型限制且白名单留空时，应提交空 model_mapping 以支持所有模型', async () => {

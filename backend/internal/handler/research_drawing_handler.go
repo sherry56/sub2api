@@ -73,18 +73,16 @@ type researchDrawingDirectGPTConfig struct {
 }
 
 type ResearchDrawingGenerateRequest struct {
-	MethodContent         string `json:"method_content" binding:"required"`
-	Caption               string `json:"caption"`
-	OptimizeMethodContent bool   `json:"optimize_method_content"`
-	GenerationMode        string `json:"generation_mode"`
-	ExpMode               string `json:"exp_mode"`
-	RetrievalSetting      string `json:"retrieval_setting"`
-	NumCandidates         int    `json:"num_candidates"`
-	AspectRatio           string `json:"aspect_ratio"`
-	MaxCriticRounds       int    `json:"max_critic_rounds"`
-	MaxRefineResolution   string `json:"max_refine_resolution"`
-	MainModelName         string `json:"main_model_name"`
-	ImageGenModelName     string `json:"image_gen_model_name"`
+	MethodContent       string `json:"method_content" binding:"required"`
+	Caption             string `json:"caption"`
+	GenerationMode      string `json:"generation_mode"`
+	ExpMode             string `json:"exp_mode"`
+	RetrievalSetting    string `json:"retrieval_setting"`
+	NumCandidates       int    `json:"num_candidates"`
+	AspectRatio         string `json:"aspect_ratio"`
+	MaxCriticRounds     int    `json:"max_critic_rounds"`
+	MaxRefineResolution string `json:"max_refine_resolution"`
+	ImageGenModelName   string `json:"image_gen_model_name"`
 }
 
 type researchDrawingGenerateResponse struct {
@@ -131,11 +129,6 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 	user, err := h.userService.GetProfile(c.Request.Context(), subject.UserID)
 	if err != nil {
 		response.ErrorFrom(c, err)
-		return
-	}
-
-	if req.OptimizeMethodContent && !h.researchDrawingMethodOptimizationEnabled(c.Request.Context()) {
-		response.BadRequest(c, "\u65b9\u6cd5\u5185\u5bb9\u4f18\u5316\u6682\u672a\u542f\u7528")
 		return
 	}
 
@@ -312,7 +305,6 @@ func (h *ResearchDrawingHandler) submitToPaperBanana(c *gin.Context, user *servi
 		"email":                   user.Email,
 		"method_content":          req.MethodContent,
 		"caption":                 req.Caption,
-		"optimize_method_content": req.OptimizeMethodContent,
 		"generation_mode":         req.GenerationMode,
 		"exp_mode":                req.ExpMode,
 		"retrieval_setting":       req.RetrievalSetting,
@@ -320,7 +312,6 @@ func (h *ResearchDrawingHandler) submitToPaperBanana(c *gin.Context, user *servi
 		"aspect_ratio":            req.AspectRatio,
 		"max_critic_rounds":       req.MaxCriticRounds,
 		"max_refine_resolution":   req.MaxRefineResolution,
-		"main_model_name":         req.MainModelName,
 		"image_gen_model_name":    req.ImageGenModelName,
 	}
 	body, err := json.Marshal(payload)
@@ -714,16 +705,6 @@ func (r *ResearchDrawingGenerateRequest) normalize() {
 	if r.MaxRefineResolution != "4K" {
 		r.MaxRefineResolution = "2K"
 	}
-	r.MainModelName = strings.TrimSpace(r.MainModelName)
-	if len(r.MainModelName) > 200 {
-		r.MainModelName = r.MainModelName[:200]
-	}
-	switch r.MainModelName {
-	case researchDrawingDefaultMainModelName:
-	case researchDrawingGPT55ModelName:
-	default:
-		r.MainModelName = researchDrawingDefaultMainModelName
-	}
 	r.ImageGenModelName = strings.TrimSpace(r.ImageGenModelName)
 	if len(r.ImageGenModelName) > 200 {
 		r.ImageGenModelName = r.ImageGenModelName[:200]
@@ -736,10 +717,6 @@ func (r *ResearchDrawingGenerateRequest) normalize() {
 	}
 }
 
-func (r ResearchDrawingGenerateRequest) isGPT55() bool {
-	return strings.TrimSpace(r.MainModelName) == researchDrawingGPT55ModelName
-}
-
 func (r ResearchDrawingGenerateRequest) isGPTImage2() bool {
 	return strings.TrimSpace(r.ImageGenModelName) == researchDrawingGPTImage2ModelName
 }
@@ -749,7 +726,6 @@ func (r ResearchDrawingGenerateRequest) isDirectGPTMode() bool {
 }
 
 func (r *ResearchDrawingGenerateRequest) forceDirectGPTMode() {
-	r.OptimizeMethodContent = false
 	r.GenerationMode = "default"
 	r.ExpMode = "demo_planner_critic"
 	r.RetrievalSetting = "none"
@@ -827,14 +803,6 @@ func (h *ResearchDrawingHandler) researchDrawingDirectGPTConfig(ctx context.Cont
 			os.Getenv("GPT_IMAGE_BASE_URL"),
 			os.Getenv("GPT_BASE_URL"),
 		), "/"),
-	}
-	if req.isGPT55() && !req.isGPTImage2() {
-		if cfg.TextAPIKey == "" {
-			return cfg, fmt.Errorf("GPT_API_KEY is required for gpt-5.5 direct mode")
-		}
-		if cfg.TextBaseURL == "" {
-			return cfg, fmt.Errorf("GPT_BASE_URL is required for gpt-5.5 direct mode")
-		}
 	}
 	if cfg.ImageAPIKey == "" {
 		return cfg, fmt.Errorf("GPT_IMAGE_API_KEY is required for gpt-image-2 direct mode")

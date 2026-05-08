@@ -593,7 +593,6 @@ type ResearchDrawingForm = {
   research_drawing_num_candidates: number
   research_drawing_aspect_ratio: string
   research_drawing_max_critic_rounds: number
-  research_drawing_main_model_name: string
   research_drawing_image_gen_model_name: string
   research_drawing_max_refine_resolution: string
   research_drawing_unit_price: number
@@ -639,7 +638,6 @@ const DEFAULT_EXAMPLE_CAPTION =
   '图 1：PaperVizAgent 框架概览。给定源文本上下文和表达意图后，系统首先检索相关参考示例，并合成经过风格优化的描述。随后通过可视化与评审循环进行多轮细化，最终生成学术图。'
 
 const GEMINI_IMAGE_MODEL = 'openrouter/google/gemini-3.1-flash-image-preview'
-const DEFAULT_MAIN_MODEL = 'openrouter/google/gemini-3-flash-preview'
 const GPT_IMAGE_2_MODEL = 'gpt-image-2'
 const MODEL_UNIT_PRICES: Record<string, number> = {
   [GEMINI_IMAGE_MODEL]: 2.99,
@@ -666,7 +664,6 @@ const RESEARCH_DRAWING_DEFAULTS: ResearchDrawingForm = {
   research_drawing_num_candidates: 1,
   research_drawing_aspect_ratio: '16:9',
   research_drawing_max_critic_rounds: 2,
-  research_drawing_main_model_name: DEFAULT_MAIN_MODEL,
   research_drawing_image_gen_model_name: GEMINI_IMAGE_MODEL,
   research_drawing_max_refine_resolution: '2K',
   research_drawing_unit_price: 2.99,
@@ -809,7 +806,6 @@ function normalizeFormValues() {
     5,
     Math.max(1, Number(form.research_drawing_max_critic_rounds) || RESEARCH_DRAWING_DEFAULTS.research_drawing_max_critic_rounds),
   )
-  form.research_drawing_main_model_name = DEFAULT_MAIN_MODEL
   form.research_drawing_image_gen_model_name =
     form.research_drawing_image_gen_model_name?.trim() || RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
   if (!allowedImageModelValues.has(form.research_drawing_image_gen_model_name)) {
@@ -828,7 +824,6 @@ function applySettings(settings: SystemSettings) {
   form.research_drawing_num_candidates = settings.research_drawing_num_candidates || RESEARCH_DRAWING_DEFAULTS.research_drawing_num_candidates
   form.research_drawing_aspect_ratio = settings.research_drawing_aspect_ratio || RESEARCH_DRAWING_DEFAULTS.research_drawing_aspect_ratio
   form.research_drawing_max_critic_rounds = settings.research_drawing_max_critic_rounds || RESEARCH_DRAWING_DEFAULTS.research_drawing_max_critic_rounds
-  form.research_drawing_main_model_name = DEFAULT_MAIN_MODEL
   form.research_drawing_image_gen_model_name = settings.research_drawing_image_gen_model_name || RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
   form.research_drawing_max_refine_resolution = settings.research_drawing_max_refine_resolution || RESEARCH_DRAWING_DEFAULTS.research_drawing_max_refine_resolution
   form.research_drawing_unit_price = selectedUnitPrice.value
@@ -858,7 +853,6 @@ watch(
     if (!canUseCustomGenerationMode.value) {
       generationInput.generationMode = 'default'
     }
-    form.research_drawing_main_model_name = DEFAULT_MAIN_MODEL
     form.research_drawing_unit_price = selectedUnitPrice.value
   },
 )
@@ -880,9 +874,7 @@ async function startGenerationPreview() {
     const payload: ResearchDrawingGenerateRequest = {
       method_content: generationInput.methodContent,
       caption: generationInput.caption,
-      optimize_method_content: false,
       generation_mode: isDirectGPTMode.value ? 'default' : generationInput.generationMode,
-      main_model_name: DEFAULT_MAIN_MODEL,
       image_gen_model_name: form.research_drawing_image_gen_model_name,
       ...(showPaperBananaParameters.value
         ? {
@@ -1088,7 +1080,6 @@ async function saveSettings() {
       research_drawing_num_candidates: form.research_drawing_num_candidates,
       research_drawing_aspect_ratio: form.research_drawing_aspect_ratio,
       research_drawing_max_critic_rounds: form.research_drawing_max_critic_rounds,
-      research_drawing_main_model_name: DEFAULT_MAIN_MODEL,
       research_drawing_image_gen_model_name: form.research_drawing_image_gen_model_name,
       research_drawing_max_refine_resolution: form.research_drawing_max_refine_resolution,
       research_drawing_unit_price: selectedUnitPrice.value,

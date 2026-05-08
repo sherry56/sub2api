@@ -682,7 +682,7 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
       }
     },
     'gpt-5.3-codex-spark': {
-      name: 'GPT-5.3 Codex Spark',
+      name: 'GPT 5.3 Codex Spark',
       limit: {
         context: 128000,
         output: 32000
@@ -698,7 +698,7 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
       }
     },
     'gpt-5.3-codex': {
-      name: 'GPT-5.3 Codex',
+      name: 'GPT 5.3 Codex',
       limit: {
         context: 400000,
         output: 128000

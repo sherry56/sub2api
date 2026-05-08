@@ -86,7 +86,6 @@ func TestResearchDrawingGPTImage2UsesDirectModeConfigFromSettings(t *testing.T) 
 
 	req := ResearchDrawingGenerateRequest{
 		MethodContent:     "method",
-		MainModelName:     researchDrawingDefaultMainModelName,
 		ImageGenModelName: researchDrawingGPTImage2ModelName,
 	}
 	req.normalize()
@@ -158,7 +157,6 @@ func TestResearchDrawingGPTImage2IgnoresGPT55MainModel(t *testing.T) {
 	req := ResearchDrawingGenerateRequest{
 		MethodContent:     "raw method content",
 		Caption:           "raw caption",
-		MainModelName:     researchDrawingGPT55ModelName,
 		ImageGenModelName: researchDrawingGPTImage2ModelName,
 		NumCandidates:     8,
 		MaxCriticRounds:   5,
@@ -166,7 +164,7 @@ func TestResearchDrawingGPTImage2IgnoresGPT55MainModel(t *testing.T) {
 	}
 	req.normalize()
 	if !req.isDirectGPTMode() {
-		t.Fatal("gpt-image-2 must use direct GPT mode even when main model is gpt-5.5")
+		t.Fatal("gpt-image-2 must use direct GPT mode")
 	}
 	req.forceDirectGPTMode()
 	if req.NumCandidates != 1 || req.MaxCriticRounds != 0 || req.RetrievalSetting != "none" {
@@ -204,11 +202,10 @@ func TestResearchDrawingGPTImage2IgnoresGPT55MainModel(t *testing.T) {
 func TestResearchDrawingGeminiImageModelKeepsPaperBananaPath(t *testing.T) {
 	req := ResearchDrawingGenerateRequest{
 		MethodContent:     "method",
-		MainModelName:     researchDrawingGPT55ModelName,
 		ImageGenModelName: researchDrawingDefaultImageModelName,
 	}
 	req.normalize()
 	if req.isDirectGPTMode() {
-		t.Fatal("Gemini/OpenRouter image model must stay on the PaperBanana path even when the main model is gpt-5.5")
+		t.Fatal("Gemini/OpenRouter image model must stay on the PaperBanana path")
 	}
 }

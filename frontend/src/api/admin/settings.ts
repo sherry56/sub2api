@@ -473,14 +473,11 @@ export interface SystemSettings {
   research_drawing_num_candidates?: number;
   research_drawing_aspect_ratio?: string;
   research_drawing_max_critic_rounds?: number;
-  research_drawing_main_model_name?: string;
   research_drawing_image_gen_model_name?: string;
   research_drawing_gpt_image_api_key_configured?: boolean;
   research_drawing_gpt_image_base_url?: string;
   research_drawing_max_refine_resolution?: string;
   research_drawing_unit_price?: number;
-  research_drawing_method_optimization_enabled?: boolean;
-  research_drawing_method_optimization_default_enabled?: boolean;
 
   // Balance & quota notification
   balance_low_notify_enabled: boolean;
@@ -652,14 +649,11 @@ export interface UpdateSettingsRequest {
   research_drawing_num_candidates?: number;
   research_drawing_aspect_ratio?: string;
   research_drawing_max_critic_rounds?: number;
-  research_drawing_main_model_name?: string;
   research_drawing_image_gen_model_name?: string;
   research_drawing_gpt_image_api_key?: string;
   research_drawing_gpt_image_base_url?: string;
   research_drawing_max_refine_resolution?: string;
   research_drawing_unit_price?: number;
-  research_drawing_method_optimization_enabled?: boolean;
-  research_drawing_method_optimization_default_enabled?: boolean;
   // Balance & quota notification
   balance_low_notify_enabled?: boolean;
   balance_low_notify_threshold?: number;

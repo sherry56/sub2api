@@ -3,7 +3,6 @@ import { apiClient } from './client'
 export interface ResearchDrawingGenerateRequest {
   method_content: string
   caption?: string
-  optimize_method_content?: boolean
   generation_mode?: string
   exp_mode?: string
   retrieval_setting?: string
@@ -11,7 +10,6 @@ export interface ResearchDrawingGenerateRequest {
   aspect_ratio?: string
   max_critic_rounds?: number
   max_refine_resolution?: string
-  main_model_name?: string
   image_gen_model_name?: string
 }
 
