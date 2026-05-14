@@ -20,6 +20,8 @@ export interface ResearchDrawingGenerateResponse {
   paperbanana_url?: string
   paperbanana_user?: string
   charge: number
+  unit_price: number
+  estimated_price: number
   quota_need: number
 }
 

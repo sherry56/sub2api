@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/model"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 )
 
 type researchDrawingSettingRepoStub struct {
@@ -108,6 +109,13 @@ type researchDrawingBalanceUpdate struct {
 func (r *researchDrawingRefundUserRepoStub) UpdateBalance(ctx context.Context, userID int64, amount float64) error {
 	r.updates = append(r.updates, researchDrawingBalanceUpdate{userID: userID, amount: amount})
 	return nil
+}
+
+func newResearchDrawingTestContext(method, path string) *gin.Context {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(method, path, nil)
+	return c
 }
 
 func TestResearchDrawingGPTImage2UsesDirectModeConfigFromEnv(t *testing.T) {
@@ -478,6 +486,67 @@ func TestApplyResearchDrawingFriendlyStatusError(t *testing.T) {
 	}
 }
 
+func TestResearchDrawingPaperBananaSubmit502KeepsStatusCodeForFriendlyMessage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/sub2api/generate" {
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("<html>upstream_error</html>"))
+	}))
+	defer server.Close()
+	t.Setenv("RESEARCH_DRAWING_API_URL", server.URL)
+
+	handler := NewResearchDrawingHandler(nil, nil, nil)
+	handler.httpClient = server.Client()
+	req := ResearchDrawingGenerateRequest{
+		MethodContent:     "method",
+		ImageGenModelName: researchDrawingDefaultImageModelName,
+	}
+	req.normalize()
+	_, err := handler.submitToPaperBanana(newResearchDrawingTestContext(http.MethodPost, "/research-drawing/generate"), &service.User{ID: 3, Username: "u", Email: "u@example.com"}, req)
+	if err == nil {
+		t.Fatal("submitToPaperBanana returned nil error")
+	}
+	if !strings.Contains(err.Error(), "status_code=502") {
+		t.Fatalf("submit error = %q, want status_code=502", err.Error())
+	}
+	if got := handler.researchDrawingUserFacingError("paperbanana_submit_failed", "", req.ImageGenModelName, err); got != researchDrawingUpstreamBusyMessage {
+		t.Fatalf("friendly submit error = %q, want upstream busy message", got)
+	}
+}
+
+func TestResearchDrawingPaperBananaStatus524KeepsStatusCodeForFriendlyMessage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/sub2api/job/pb-job" {
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(524)
+		_, _ = w.Write([]byte("<html>timeout</html>"))
+	}))
+	defer server.Close()
+	t.Setenv("RESEARCH_DRAWING_API_URL", server.URL)
+
+	handler := NewResearchDrawingHandler(nil, nil, nil)
+	handler.httpClient = server.Client()
+	_, err := handler.getPaperBananaStatus(newResearchDrawingTestContext(http.MethodGet, "/research-drawing/jobs/pb-job"), 3, "pb-job", "u")
+	if err == nil {
+		t.Fatal("getPaperBananaStatus returned nil error")
+	}
+	if !strings.Contains(err.Error(), "status_code=524") {
+		t.Fatalf("status error = %q, want status_code=524", err.Error())
+	}
+	if got := handler.researchDrawingUserFacingError("paperbanana_status_failed", "pb-job", researchDrawingDefaultImageModelName, err); got != researchDrawingUpstreamTimeoutMessage {
+		t.Fatalf("friendly status error = %q, want upstream timeout message", got)
+	}
+}
+
 func TestResearchDrawingGPTImage2DirectHTTPClientUses300SecondTimeout(t *testing.T) {
 	base := &http.Client{Timeout: time.Second}
 	got := researchDrawingHTTPClientWithTimeout(base, researchDrawingGPTImage2Timeout)
@@ -528,7 +597,11 @@ func TestResearchDrawingChargeJobOnceUsesResolvedPriceAndSkipsDuplicate(t *testi
 		t.Fatalf("unexpected charge update: %+v", userRepo.updates[0])
 	}
 	job := handler.jobs[jobID]
-	if !job.Charged || job.Charging || job.Charge != researchDrawingGPTImage2UnitPrice || job.ResolvedPrice != researchDrawingGPTImage2UnitPrice {
+	if !job.Charged ||
+		job.Charging ||
+		job.Charge != researchDrawingGPTImage2UnitPrice ||
+		job.ResolvedPrice != researchDrawingGPTImage2UnitPrice ||
+		job.ActualChargeAmount != researchDrawingGPTImage2UnitPrice {
 		t.Fatalf("unexpected job billing state: %+v", job)
 	}
 }
@@ -558,6 +631,42 @@ func TestResearchDrawingRefundJobOnceUsesResolvedPriceAndSkipsDuplicate(t *testi
 	}
 	if !handler.jobs[jobID].Refunded {
 		t.Fatal("job was not marked refunded")
+	}
+	if handler.jobs[jobID].ActualRefundAmount != researchDrawingGPTImage2UnitPrice {
+		t.Fatalf("actual refund amount = %.4f, want %.4f", handler.jobs[jobID].ActualRefundAmount, researchDrawingGPTImage2UnitPrice)
+	}
+}
+
+func TestResearchDrawingNanoBananaRefundUsesActualChargeAmount(t *testing.T) {
+	userRepo := &researchDrawingRefundUserRepoStub{}
+	userSvc := service.NewUserService(userRepo, nil, nil, nil)
+	handler := NewResearchDrawingHandler(userSvc, nil, nil)
+
+	jobID := "job-nano-refund-once"
+	handler.jobs[jobID] = researchDrawingJobCharge{
+		UserID:             12,
+		Charge:             researchDrawingNanoBanana2UnitPrice,
+		ResolvedPrice:      researchDrawingNanoBanana2UnitPrice,
+		ActualChargeAmount: researchDrawingNanoBanana2UnitPrice,
+		Charged:            true,
+		ImageGenModelName:  researchDrawingDefaultImageModelName,
+		Status:             "running",
+	}
+	handler.refundJobOnceWithContext(context.Background(), 12, jobID)
+	handler.refundJobOnceWithContext(context.Background(), 12, jobID)
+
+	if len(userRepo.updates) != 1 {
+		t.Fatalf("balance updates = %d, want 1", len(userRepo.updates))
+	}
+	if userRepo.updates[0].userID != 12 || userRepo.updates[0].amount != researchDrawingNanoBanana2UnitPrice {
+		t.Fatalf("unexpected Nano Banana refund update: %+v", userRepo.updates[0])
+	}
+	job := handler.jobs[jobID]
+	if !job.Refunded || job.ActualRefundAmount != job.ActualChargeAmount {
+		t.Fatalf("unexpected Nano Banana refund state: %+v", job)
+	}
+	if job.Status != "error" {
+		t.Fatalf("refunded failed job status = %q, want error", job.Status)
 	}
 }
 

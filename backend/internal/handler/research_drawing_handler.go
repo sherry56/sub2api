@@ -59,6 +59,8 @@ type researchDrawingJobCharge struct {
 	UserID          int64
 	Charge          float64
 	ResolvedPrice   float64
+	ActualChargeAmount float64
+	ActualRefundAmount float64
 	Charged         bool
 	Charging        bool
 	Refunded        bool
@@ -106,6 +108,8 @@ type researchDrawingGenerateResponse struct {
 	PaperBananaURL  string  `json:"paperbanana_url,omitempty"`
 	PaperBananaUser string  `json:"paperbanana_user,omitempty"`
 	Charge          float64 `json:"charge"`
+	UnitPrice       float64 `json:"unit_price"`
+	EstimatedPrice  float64 `json:"estimated_price"`
 	QuotaNeed       int     `json:"quota_need"`
 }
 
@@ -197,12 +201,16 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 			Status:    "running",
 			Mode:      "direct_gpt",
 			Charge:    resolvedPrice,
+			UnitPrice: resolvedPrice,
+			EstimatedPrice: resolvedPrice,
 			QuotaNeed: req.directQuotaNeed(),
 		})
 		return
 	}
 
+	h.logBillingEvent("charge_attempt", "", subject.UserID, req.ImageGenModelName, resolvedPrice, resolvedPrice, 0, "pending", nil)
 	if err := h.userService.UpdateBalance(c.Request.Context(), subject.UserID, -resolvedPrice); err != nil {
+		h.logBillingEvent("charge_failed", "", subject.UserID, req.ImageGenModelName, resolvedPrice, resolvedPrice, 0, "charge_failed", err)
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -239,6 +247,8 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 		PaperBananaURL:  paperBananaBaseURL(),
 		PaperBananaUser: pbUser,
 		Charge:          resolvedPrice,
+		UnitPrice:       resolvedPrice,
+		EstimatedPrice:  resolvedPrice,
 		QuotaNeed:       req.quotaNeed(),
 	})
 }
@@ -310,6 +320,9 @@ func (h *ResearchDrawingHandler) JobImage(c *gin.Context) {
 
 	if body, contentType, handled, err := h.getDirectJobImage(c.Request.Context(), subject.UserID, jobID, candidateID); handled {
 		if err != nil {
+			if infraerrors.Reason(err) == "RESEARCH_DRAWING_IMAGE_NOT_FOUND" {
+				h.refundJobOnce(c, subject.UserID, jobID)
+			}
 			response.ErrorFrom(c, err)
 			return
 		}
@@ -389,14 +402,17 @@ func (h *ResearchDrawingHandler) chargeJobOnceWithContext(ctx context.Context, u
 	job.Charging = true
 	job.Charge = resolvedPrice
 	job.ResolvedPrice = resolvedPrice
+	job.ActualChargeAmount = resolvedPrice
 	job.ImageGenModelName = imageModelName
 	h.jobs[jobID] = job
 	h.mu.Unlock()
 
+	h.logBillingEvent("charge_attempt", jobID, userID, imageModelName, resolvedPrice, resolvedPrice, 0, "pending", nil)
 	if err := h.userService.UpdateBalance(ctx, userID, -resolvedPrice); err != nil {
 		h.mu.Lock()
 		if latest, ok := h.jobs[jobID]; ok && latest.UserID == userID {
 			latest.Charging = false
+			latest.ActualChargeAmount = 0
 			h.jobs[jobID] = latest
 		}
 		h.mu.Unlock()
@@ -410,6 +426,7 @@ func (h *ResearchDrawingHandler) chargeJobOnceWithContext(ctx context.Context, u
 	job.Charged = true
 	job.Charge = resolvedPrice
 	job.ResolvedPrice = resolvedPrice
+	job.ActualChargeAmount = resolvedPrice
 	job.ImageGenModelName = imageModelName
 	h.jobs[jobID] = job
 	finalStatus := job.Status
@@ -433,6 +450,7 @@ func (h *ResearchDrawingHandler) recordPrechargedJob(jobID string, userID int64,
 		UserID:            userID,
 		Charge:            resolvedPrice,
 		ResolvedPrice:     resolvedPrice,
+		ActualChargeAmount: resolvedPrice,
 		Charged:           true,
 		PaperBananaUser:   pbUser,
 		ImageGenModelName: imageModelName,
@@ -452,7 +470,7 @@ func (h *ResearchDrawingHandler) refundUntrackedCharge(ctx context.Context, user
 	if err != nil {
 		event = "refund_failed"
 	}
-	h.logBillingEvent(event, jobID, userID, imageModelName, resolvedPrice, 0, resolvedPrice, finalStatus, err)
+	h.logBillingEvent(event, jobID, userID, imageModelName, resolvedPrice, resolvedPrice, resolvedPrice, finalStatus, err)
 }
 
 func (h *ResearchDrawingHandler) refundJobOnce(c *gin.Context, userID int64, jobID string) {
@@ -473,24 +491,28 @@ func (h *ResearchDrawingHandler) refundJobOnceWithContext(ctx context.Context, u
 		h.mu.Unlock()
 		return
 	}
+	finalStatus := strings.TrimSpace(charge.Status)
+	if finalStatus == "" || strings.EqualFold(finalStatus, "running") {
+		finalStatus = "error"
+	}
+	refundAmount := researchDrawingActualChargeAmount(charge)
 	charge.Refunded = true
+	charge.ActualRefundAmount = refundAmount
+	charge.Status = finalStatus
 	h.jobs[jobID] = charge
 	h.mu.Unlock()
-	refundAmount := charge.ResolvedPrice
-	if refundAmount <= 0 {
-		refundAmount = charge.Charge
-	}
 	if err := h.userService.UpdateBalance(ctx, userID, refundAmount); err != nil {
 		h.mu.Lock()
 		if latest, ok := h.jobs[jobID]; ok && latest.UserID == userID {
 			latest.Refunded = false
+			latest.ActualRefundAmount = 0
 			h.jobs[jobID] = latest
 		}
 		h.mu.Unlock()
-		h.logBillingEvent("refund_failed", jobID, userID, charge.ImageGenModelName, refundAmount, 0, refundAmount, charge.Status, err)
+		h.logBillingEvent("refund_failed", jobID, userID, charge.ImageGenModelName, charge.ResolvedPrice, researchDrawingActualChargeAmount(charge), refundAmount, finalStatus, err)
 		return
 	}
-	h.logBillingEvent("refund", jobID, userID, charge.ImageGenModelName, refundAmount, 0, refundAmount, charge.Status, nil)
+	h.logBillingEvent("refund", jobID, userID, charge.ImageGenModelName, charge.ResolvedPrice, researchDrawingActualChargeAmount(charge), refundAmount, finalStatus, nil)
 }
 
 func (h *ResearchDrawingHandler) submitToPaperBanana(c *gin.Context, user *service.User, req ResearchDrawingGenerateRequest) (map[string]any, error) {
@@ -531,12 +553,17 @@ func (h *ResearchDrawingHandler) submitToPaperBanana(c *gin.Context, user *servi
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	var out map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("PaperBanana read response: status_code=%d: %w", resp.StatusCode, err)
 	}
+	var out map[string]any
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("PaperBanana returned %d: %s", resp.StatusCode, stringFromMap(out, "error"))
+		_ = json.Unmarshal(respBody, &out)
+		return nil, fmt.Errorf("PaperBanana returned status_code=%d error=%s response_preview=%s", resp.StatusCode, stringFromMap(out, "error"), researchDrawingResponsePreview(respBody))
+	}
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return nil, fmt.Errorf("PaperBanana parse response: status_code=%d response_preview=%s: %w", resp.StatusCode, researchDrawingResponsePreview(respBody), err)
 	}
 	return out, nil
 }
@@ -577,7 +604,7 @@ func (h *ResearchDrawingHandler) getPaperBananaImage(c *gin.Context, userID int6
 		return nil, "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, "", fmt.Errorf("PaperBanana returned %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("PaperBanana image returned status_code=%d response_preview=%s", resp.StatusCode, researchDrawingResponsePreview(body))
 	}
 	return body, resp.Header.Get("Content-Type"), nil
 }
@@ -613,12 +640,17 @@ func (h *ResearchDrawingHandler) getPaperBananaStatus(c *gin.Context, userID int
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	var out map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("PaperBanana status read response: status_code=%d: %w", resp.StatusCode, err)
 	}
+	var out map[string]any
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("PaperBanana returned %d: %s", resp.StatusCode, stringFromMap(out, "error"))
+		_ = json.Unmarshal(respBody, &out)
+		return nil, fmt.Errorf("PaperBanana status returned status_code=%d error=%s response_preview=%s", resp.StatusCode, stringFromMap(out, "error"), researchDrawingResponsePreview(respBody))
+	}
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return nil, fmt.Errorf("PaperBanana status parse response: status_code=%d response_preview=%s: %w", resp.StatusCode, researchDrawingResponsePreview(respBody), err)
 	}
 	return out, nil
 }
@@ -642,6 +674,7 @@ func (h *ResearchDrawingHandler) runDirectGPTResearchDrawingJob(jobID string, re
 
 	userID := int64(0)
 	resolvedPrice := float64(0)
+	actualChargeAmount := float64(0)
 	h.mu.Lock()
 	job, ok := h.jobs[jobID]
 	if ok && job.Direct {
@@ -650,6 +683,7 @@ func (h *ResearchDrawingHandler) runDirectGPTResearchDrawingJob(jobID string, re
 		if resolvedPrice <= 0 {
 			resolvedPrice = job.Charge
 		}
+		actualChargeAmount = researchDrawingActualChargeAmount(job)
 		if job.Images == nil {
 			job.Images = make(map[int]researchDrawingDirectImage)
 		}
@@ -667,7 +701,7 @@ func (h *ResearchDrawingHandler) runDirectGPTResearchDrawingJob(jobID string, re
 	h.mu.Unlock()
 	if userID > 0 {
 		h.recordImage2Job(context.Background(), userID, jobID, researchDrawingGPTImage2ModelName)
-		h.logBillingEvent("final_status", jobID, userID, req.ImageGenModelName, resolvedPrice, 0, 0, "done", nil)
+		h.logBillingEvent("final_status", jobID, userID, req.ImageGenModelName, resolvedPrice, actualChargeAmount, 0, "done", nil)
 	}
 	log.Printf("[ResearchDrawing] direct GPT candidate image saved job_id=%s candidate_id=0 bytes=%d path=%s", jobID, len(imageBytes), outPath)
 }
@@ -861,6 +895,7 @@ func (h *ResearchDrawingHandler) failDirectJob(jobID string, err error) {
 	userMessage := researchDrawingFriendlyUpstreamErrorMessage(technicalMessage)
 	userID := int64(0)
 	resolvedPrice := float64(0)
+	actualChargeAmount := float64(0)
 	imageModelName := researchDrawingGPTImage2ModelName
 	h.mu.Lock()
 	job, ok := h.jobs[jobID]
@@ -870,6 +905,7 @@ func (h *ResearchDrawingHandler) failDirectJob(jobID string, err error) {
 		if resolvedPrice <= 0 {
 			resolvedPrice = job.Charge
 		}
+		actualChargeAmount = researchDrawingActualChargeAmount(job)
 		if strings.TrimSpace(job.ImageGenModelName) != "" {
 			imageModelName = job.ImageGenModelName
 		}
@@ -881,7 +917,7 @@ func (h *ResearchDrawingHandler) failDirectJob(jobID string, err error) {
 	h.mu.Unlock()
 	if userID > 0 {
 		h.refundJobOnceWithContext(context.Background(), userID, jobID)
-		h.logBillingEvent("final_status", jobID, userID, imageModelName, resolvedPrice, 0, 0, "error", err)
+		h.logBillingEvent("final_status", jobID, userID, imageModelName, resolvedPrice, actualChargeAmount, 0, "error", err)
 	}
 	log.Printf("[ResearchDrawing] direct GPT generation failed job_id=%s image_gen_model_name=%s error=%s user_error=%s", jobID, imageModelName, technicalMessage, userMessage)
 }
@@ -1088,6 +1124,16 @@ func normalizeResearchDrawingImageModelNameForLog(imageModelName string) string 
 	return trimmed
 }
 
+func researchDrawingActualChargeAmount(job researchDrawingJobCharge) float64 {
+	if job.ActualChargeAmount > 0 {
+		return job.ActualChargeAmount
+	}
+	if job.ResolvedPrice > 0 {
+		return job.ResolvedPrice
+	}
+	return job.Charge
+}
+
 func (h *ResearchDrawingHandler) logJobFinalStatus(userID int64, jobID, finalStatus string) {
 	h.mu.Lock()
 	job, ok := h.jobs[jobID]
@@ -1099,7 +1145,7 @@ func (h *ResearchDrawingHandler) logJobFinalStatus(userID int64, jobID, finalSta
 	if resolvedPrice <= 0 {
 		resolvedPrice = job.Charge
 	}
-	h.logBillingEvent("final_status", jobID, userID, job.ImageGenModelName, resolvedPrice, 0, 0, finalStatus, nil)
+	h.logBillingEvent("final_status", jobID, userID, job.ImageGenModelName, resolvedPrice, researchDrawingActualChargeAmount(job), job.ActualRefundAmount, finalStatus, nil)
 }
 
 func (h *ResearchDrawingHandler) logBillingEvent(event, jobID string, userID int64, imageModelName string, resolvedPrice, chargeAmount, refundAmount float64, finalStatus string, err error) {
@@ -1107,18 +1153,77 @@ func (h *ResearchDrawingHandler) logBillingEvent(event, jobID string, userID int
 	if err != nil {
 		errMessage = err.Error()
 	}
+	imageModelName = normalizeResearchDrawingImageModelNameForLog(imageModelName)
+	chargeStatus := researchDrawingChargeStatus(event, chargeAmount)
+	refundStatus := researchDrawingRefundStatus(event, refundAmount)
 	log.Printf(
-		"[ResearchDrawing] billing event=%s job_id=%s user_id=%d image_gen_model_name=%s resolved_price=%.4f charge_amount=%.4f refund_amount=%.4f final_status=%s error=%s",
+		"[ResearchDrawing] billing event=%s job_id=%s user_id=%d image_gen_model_name=%s resolved_price=%.4f actual_charge_amount=%.4f actual_refund_amount=%.4f charge_source=%s charge_status=%s refund_status=%s final_status=%s has_valid_image=%t error=%s",
 		event,
 		jobID,
 		userID,
-		normalizeResearchDrawingImageModelNameForLog(imageModelName),
+		imageModelName,
 		resolvedPrice,
 		chargeAmount,
 		refundAmount,
+		researchDrawingChargeSource(imageModelName),
+		chargeStatus,
+		refundStatus,
 		finalStatus,
+		researchDrawingFinalStatusHasValidImage(finalStatus),
 		errMessage,
 	)
+}
+
+func researchDrawingChargeSource(imageModelName string) string {
+	switch strings.TrimSpace(imageModelName) {
+	case researchDrawingGPTImage2ModelName:
+		return "model_price:gpt-image-2"
+	case researchDrawingDefaultImageModelName:
+		return "model_price:nano-banana-2"
+	default:
+		return "model_price:fallback"
+	}
+}
+
+func researchDrawingChargeStatus(event string, chargeAmount float64) string {
+	switch event {
+	case "charge_attempt":
+		return "attempting"
+	case "charge":
+		return "charged"
+	case "charge_failed":
+		return "failed"
+	case "charge_skipped":
+		return "skipped"
+	default:
+		if chargeAmount > 0 {
+			return "charged"
+		}
+		return "not_applicable"
+	}
+}
+
+func researchDrawingRefundStatus(event string, refundAmount float64) string {
+	switch event {
+	case "refund":
+		return "refunded"
+	case "refund_failed":
+		return "failed"
+	default:
+		if refundAmount > 0 {
+			return "refunded"
+		}
+		return "not_applicable"
+	}
+}
+
+func researchDrawingFinalStatusHasValidImage(finalStatus string) bool {
+	switch strings.ToLower(strings.TrimSpace(finalStatus)) {
+	case "done", "success", "succeeded", "completed", "complete", "finished":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *ResearchDrawingHandler) researchDrawingUserFacingError(event, jobID, imageModelName string, err error) string {
