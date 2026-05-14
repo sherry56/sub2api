@@ -645,7 +645,7 @@ const baseImageModelOptions = [
     value: GEMINI_IMAGE_MODEL,
   },
   {
-    label: 'GPT Image 2 ($0.99 fast)',
+    label: 'GPT Image 2',
     value: GPT_IMAGE_2_MODEL,
   },
 ]

@@ -5821,8 +5821,8 @@ export default {
       subtitle: 'Generate SCI-style paper framework diagrams, mechanism workflows, and statistical figures in one click',
       description: 'Built for manuscript writing, project reporting, and academic presentation scenarios, with research color palettes, academic layouts, and figure expression conventions. Now supporting GPT Image 2 and Nano Banana 2 to quickly create clear, professional visuals for papers and PPT decks.',
       price: 'Price is based on the selected image model',
-      priceGptImage2: 'GPT Image 2: $0.99/use',
-      priceNanoBanana2: 'Nano Banana 2: $2.99/use',
+      priceGptImage2: 'GPT Image 2: 0.99/use',
+      priceNanoBanana2: 'Nano Banana 2: 2.99/use',
       badges: {
         research: 'Research-focused',
         sci: 'SCI palette',

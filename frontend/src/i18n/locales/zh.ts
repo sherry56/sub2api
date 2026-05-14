@@ -5980,8 +5980,8 @@ export default {
       subtitle: '一键生成 SCI 风格论文框架图、机制流程图与统计图',
       description: '面向论文写作、课题汇报和学术展示场景，内置科研配色、学术化版式与图表表达规范，并已支持 GPT Image 2 与 Nano Banana 2 模型，帮助用户快速生成清晰、专业、可用于论文和 PPT 展示的科研图形。',
       price: '价格按所选生图模型显示',
-      priceGptImage2: 'GPT Image 2：$0.99/次',
-      priceNanoBanana2: 'Nano Banana 2：$2.99/次',
+      priceGptImage2: 'GPT Image 2：0.99/次',
+      priceNanoBanana2: 'Nano Banana 2：2.99/次',
       badges: {
         research: '科研专用',
         sci: 'SCI配色',
