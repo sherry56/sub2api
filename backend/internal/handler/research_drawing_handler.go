@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/model"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -30,8 +32,12 @@ import (
 
 const (
 	researchDrawingUnitPrice             = 2.99
+	researchDrawingGPTImage2UnitPrice    = 0.99
 	researchDrawingDefaultImageModelName = "openrouter/google/gemini-3.1-flash-image-preview"
 	researchDrawingGPTImage2ModelName    = "gpt-image-2"
+	researchDrawingGPTImage2DirectSize   = "1024x1024"
+	researchDrawingGPTImage2MaxAttempts  = 2
+	researchDrawingGPTImage2Timeout      = 300 * time.Second
 )
 
 type ResearchDrawingHandler struct {
@@ -148,7 +154,7 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 		}
 	}
 
-	charge := h.researchDrawingUnitPrice(c.Request.Context())
+	charge := h.researchDrawingUnitPrice(c.Request.Context(), req.ImageGenModelName)
 	if user.Balance < charge {
 		response.ErrorFrom(c, infraerrors.New(http.StatusPaymentRequired, "INSUFFICIENT_BALANCE", "insufficient balance"))
 		return
@@ -350,6 +356,12 @@ func (h *ResearchDrawingHandler) refundJobOnceWithContext(ctx context.Context, u
 	h.jobs[jobID] = charge
 	h.mu.Unlock()
 	if err := h.userService.UpdateBalance(ctx, userID, charge.Charge); err != nil {
+		h.mu.Lock()
+		if latest, ok := h.jobs[jobID]; ok && latest.UserID == userID {
+			latest.Refunded = false
+			h.jobs[jobID] = latest
+		}
+		h.mu.Unlock()
 		log.Printf("[ResearchDrawing] refund failed job_id=%s user_id=%d charge=%.4f error=%s", jobID, userID, charge.Charge, err.Error())
 		return
 	}
@@ -487,11 +499,11 @@ func (h *ResearchDrawingHandler) getPaperBananaStatus(c *gin.Context, userID int
 }
 
 func (h *ResearchDrawingHandler) runDirectGPTResearchDrawingJob(jobID string, req ResearchDrawingGenerateRequest, cfg researchDrawingDirectGPTConfig) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(researchDrawingGPTImage2MaxAttempts)*researchDrawingGPTImage2Timeout+30*time.Second)
 	defer cancel()
 
 	imagePrompt := buildResearchDrawingDirectImagePrompt(req)
-	imageBytes, err := h.generateResearchDrawingDirectImage(ctx, req, imagePrompt, cfg)
+	imageBytes, err := h.generateResearchDrawingDirectImage(ctx, jobID, req, imagePrompt, cfg)
 	if err != nil {
 		h.failDirectJob(jobID, err)
 		return
@@ -549,47 +561,78 @@ func (h *ResearchDrawingHandler) recordImage2Job(ctx context.Context, userID int
 	log.Printf("[ResearchDrawing] image2 record saved job_id=%s user_id=%d model=%s", jobID, userID, record.Model)
 }
 
-func (h *ResearchDrawingHandler) generateResearchDrawingDirectImage(ctx context.Context, req ResearchDrawingGenerateRequest, imagePrompt string, cfg researchDrawingDirectGPTConfig) ([]byte, error) {
+func (h *ResearchDrawingHandler) generateResearchDrawingDirectImage(ctx context.Context, jobID string, req ResearchDrawingGenerateRequest, imagePrompt string, cfg researchDrawingDirectGPTConfig) ([]byte, error) {
 	endpoint := strings.TrimRight(cfg.ImageBaseURL, "/") + "/images/generations"
+	size := researchDrawingDirectImageSize(req.AspectRatio)
 	payload := map[string]any{
 		"model":  researchDrawingGPTImage2ModelName,
 		"prompt": imagePrompt,
-		"size":   researchDrawingDirectImageSize(req.AspectRatio),
-	}
-	body, contentType, statusCode, err := h.postResearchDrawingGPTJSON(ctx, endpoint, cfg.ImageAPIKey, payload)
-	log.Printf("[ResearchDrawing] direct GPT image request final_image_url=%s base_url_source=%s key_source=%s key_len=%d status_code=%d", endpoint, cfg.BaseURLSource, cfg.KeySource, len(cfg.ImageAPIKey), statusCode)
-	if err != nil {
-		return nil, err
-	}
-	if statusCode < 200 || statusCode >= 300 {
-		log.Printf("[ResearchDrawing] direct GPT image request failed final_image_url=%s base_url_source=%s key_source=%s key_len=%d status_code=%d content_type=%s response_preview=%s", endpoint, cfg.BaseURLSource, cfg.KeySource, len(cfg.ImageAPIKey), statusCode, contentType, researchDrawingResponsePreview(body))
-		return nil, fmt.Errorf("gpt-image-2 image request failed: status_code=%d content_type=%s response_preview=%s", statusCode, contentType, researchDrawingResponsePreview(body))
-	}
-	if strings.Contains(strings.ToLower(contentType), "text/html") {
-		return nil, fmt.Errorf("gpt-image-2 image request returned html: status_code=%d response_preview=%s", statusCode, researchDrawingResponsePreview(body))
+		"size":   size,
 	}
 
-	var parsed struct {
-		Data []struct {
-			B64JSON string `json:"b64_json"`
-		} `json:"data"`
+	var lastErr error
+	for attempt := 0; attempt < researchDrawingGPTImage2MaxAttempts; attempt++ {
+		start := time.Now()
+		body, contentType, statusCode, err := h.postResearchDrawingGPTJSON(ctx, endpoint, cfg.ImageAPIKey, payload)
+		elapsed := time.Since(start)
+		retryCount := attempt
+		if err != nil {
+			lastErr = err
+			h.logDirectGPTImageRequest(jobID, endpoint, imagePrompt, size, retryCount, statusCode, elapsed, false, cfg, contentType, nil, err)
+			if attempt+1 < researchDrawingGPTImage2MaxAttempts && isResearchDrawingRetryableDirectFailure(statusCode, err) {
+				continue
+			}
+			return nil, err
+		}
+		if statusCode < 200 || statusCode >= 300 {
+			lastErr = fmt.Errorf("gpt-image-2 image request failed: status_code=%d content_type=%s response_preview=%s", statusCode, contentType, researchDrawingResponsePreview(body))
+			h.logDirectGPTImageRequest(jobID, endpoint, imagePrompt, size, retryCount, statusCode, elapsed, false, cfg, contentType, body, lastErr)
+			if attempt+1 < researchDrawingGPTImage2MaxAttempts && isResearchDrawingRetryableDirectFailure(statusCode, nil) {
+				continue
+			}
+			return nil, lastErr
+		}
+		if strings.Contains(strings.ToLower(contentType), "text/html") {
+			lastErr = fmt.Errorf("gpt-image-2 image request returned html: status_code=%d response_preview=%s", statusCode, researchDrawingResponsePreview(body))
+			h.logDirectGPTImageRequest(jobID, endpoint, imagePrompt, size, retryCount, statusCode, elapsed, false, cfg, contentType, body, lastErr)
+			return nil, lastErr
+		}
+
+		var parsed struct {
+			Data []struct {
+				B64JSON string `json:"b64_json"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			lastErr = fmt.Errorf("parse gpt-image-2 response: %w; response_preview=%s", err, researchDrawingResponsePreview(body))
+			h.logDirectGPTImageRequest(jobID, endpoint, imagePrompt, size, retryCount, statusCode, elapsed, false, cfg, contentType, body, lastErr)
+			return nil, lastErr
+		}
+		if len(parsed.Data) == 0 || strings.TrimSpace(parsed.Data[0].B64JSON) == "" {
+			lastErr = fmt.Errorf("gpt-image-2 response missing data[0].b64_json")
+			h.logDirectGPTImageRequest(jobID, endpoint, imagePrompt, size, retryCount, statusCode, elapsed, false, cfg, contentType, body, lastErr)
+			return nil, lastErr
+		}
+		b64JSON := strings.TrimSpace(parsed.Data[0].B64JSON)
+		imageBytes, err := decodeResearchDrawingImageBase64(b64JSON)
+		if err != nil {
+			lastErr = fmt.Errorf("decode data[0].b64_json: %w", err)
+			h.logDirectGPTImageRequest(jobID, endpoint, imagePrompt, size, retryCount, statusCode, elapsed, false, cfg, contentType, body, lastErr)
+			return nil, lastErr
+		}
+		if !isValidResearchDrawingImage(imageBytes, "") {
+			lastErr = fmt.Errorf("decode data[0].b64_json: no valid image bytes")
+			h.logDirectGPTImageRequest(jobID, endpoint, imagePrompt, size, retryCount, statusCode, elapsed, false, cfg, contentType, body, lastErr)
+			return nil, lastErr
+		}
+		h.logDirectGPTImageRequest(jobID, endpoint, imagePrompt, size, retryCount, statusCode, elapsed, true, cfg, contentType, nil, nil)
+		log.Printf("[ResearchDrawing] direct GPT image parsed job_id=%s image_field=data[0].b64_json request_url=%s size=%s retry_count=%d b64_len=%d decoded_bytes=%d", jobID, endpoint, size, retryCount, len(b64JSON), len(imageBytes))
+		return imageBytes, nil
 	}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil, fmt.Errorf("parse gpt-image-2 response: %w; response_preview=%s", err, researchDrawingResponsePreview(body))
+	if lastErr != nil {
+		return nil, lastErr
 	}
-	if len(parsed.Data) == 0 || strings.TrimSpace(parsed.Data[0].B64JSON) == "" {
-		return nil, fmt.Errorf("gpt-image-2 response missing data[0].b64_json")
-	}
-	b64JSON := strings.TrimSpace(parsed.Data[0].B64JSON)
-	imageBytes, err := decodeResearchDrawingImageBase64(b64JSON)
-	if err != nil {
-		return nil, fmt.Errorf("decode data[0].b64_json: %w", err)
-	}
-	if !isValidResearchDrawingImage(imageBytes, "") {
-		return nil, fmt.Errorf("decode data[0].b64_json: no valid image bytes")
-	}
-	log.Printf("[ResearchDrawing] direct GPT image parsed image_field=data[0].b64_json request_url=%s b64_len=%d decoded_bytes=%d", endpoint, len(b64JSON), len(imageBytes))
-	return imageBytes, nil
+	return nil, fmt.Errorf("gpt-image-2 image request failed")
 }
 
 func (h *ResearchDrawingHandler) postResearchDrawingGPTJSON(ctx context.Context, endpoint, apiKey string, payload any) ([]byte, string, int, error) {
@@ -603,7 +646,8 @@ func (h *ResearchDrawingHandler) postResearchDrawingGPTJSON(ctx context.Context,
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
-	resp, err := h.httpClient.Do(httpReq)
+	client := researchDrawingHTTPClientWithTimeout(h.httpClient, researchDrawingGPTImage2Timeout)
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, "", 0, err
 	}
@@ -613,6 +657,69 @@ func (h *ResearchDrawingHandler) postResearchDrawingGPTJSON(ctx context.Context,
 		return nil, resp.Header.Get("Content-Type"), resp.StatusCode, err
 	}
 	return respBody, resp.Header.Get("Content-Type"), resp.StatusCode, nil
+}
+
+func (h *ResearchDrawingHandler) logDirectGPTImageRequest(jobID, endpoint, prompt, size string, retryCount, statusCode int, elapsed time.Duration, hasValidImage bool, cfg researchDrawingDirectGPTConfig, contentType string, body []byte, err error) {
+	errMessage := ""
+	if err != nil {
+		errMessage = err.Error()
+	}
+	responsePreview := ""
+	if len(body) > 0 && !hasValidImage {
+		responsePreview = researchDrawingResponsePreview(body)
+	}
+	log.Printf(
+		"[ResearchDrawing] direct GPT image request job_id=%s final_image_url=%s prompt_length=%d size=%s timeout_seconds=%d retry_count=%d status_code=%d elapsed_ms=%d has_valid_image=%t base_url_source=%s key_source=%s key_len=%d content_type=%s error=%s response_preview=%s",
+		jobID,
+		endpoint,
+		utf8.RuneCountInString(prompt),
+		size,
+		int(researchDrawingGPTImage2Timeout/time.Second),
+		retryCount,
+		statusCode,
+		elapsed.Milliseconds(),
+		hasValidImage,
+		cfg.BaseURLSource,
+		cfg.KeySource,
+		len(cfg.ImageAPIKey),
+		contentType,
+		errMessage,
+		responsePreview,
+	)
+}
+
+func isResearchDrawingRetryableDirectFailure(statusCode int, err error) bool {
+	switch statusCode {
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, 524:
+		return true
+	}
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	type timeoutError interface {
+		Timeout() bool
+	}
+	var timeoutErr timeoutError
+	if errors.As(err, &timeoutErr) && timeoutErr.Timeout() {
+		return true
+	}
+	errText := strings.ToLower(err.Error())
+	return strings.Contains(errText, "timeout") || strings.Contains(errText, "context deadline exceeded")
+}
+
+func researchDrawingHTTPClientWithTimeout(base *http.Client, timeout time.Duration) *http.Client {
+	if base == nil {
+		return &http.Client{Timeout: timeout}
+	}
+	return &http.Client{
+		Transport:     base.Transport,
+		CheckRedirect: base.CheckRedirect,
+		Jar:           base.Jar,
+		Timeout:       timeout,
+	}
 }
 
 func (h *ResearchDrawingHandler) failDirectJob(jobID string, err error) {
@@ -765,7 +872,7 @@ func (r *ResearchDrawingGenerateRequest) normalize() {
 		r.MaxCriticRounds = 5
 	}
 	r.MaxRefineResolution = strings.ToUpper(strings.TrimSpace(r.MaxRefineResolution))
-	if r.MaxRefineResolution != "4K" {
+	if r.MaxRefineResolution != "1K" && r.MaxRefineResolution != "4K" {
 		r.MaxRefineResolution = "2K"
 	}
 	r.ImageGenModelName = strings.TrimSpace(r.ImageGenModelName)
@@ -774,9 +881,16 @@ func (r *ResearchDrawingGenerateRequest) normalize() {
 	}
 	switch r.ImageGenModelName {
 	case researchDrawingDefaultImageModelName:
+		if r.MaxRefineResolution == "1K" {
+			r.MaxRefineResolution = "2K"
+		}
 	case researchDrawingGPTImage2ModelName:
+		r.forceDirectGPTMode()
 	default:
 		r.ImageGenModelName = researchDrawingDefaultImageModelName
+		if r.MaxRefineResolution == "1K" {
+			r.MaxRefineResolution = "2K"
+		}
 	}
 }
 
@@ -794,7 +908,7 @@ func (r *ResearchDrawingGenerateRequest) forceDirectGPTMode() {
 	r.RetrievalSetting = "none"
 	r.NumCandidates = 1
 	r.MaxCriticRounds = 0
-	r.MaxRefineResolution = "2K"
+	r.MaxRefineResolution = "1K"
 }
 
 func (r ResearchDrawingGenerateRequest) directQuotaNeed() int {
@@ -813,7 +927,10 @@ func (r ResearchDrawingGenerateRequest) quotaNeed() int {
 	return candidates * (1 + rounds)
 }
 
-func (h *ResearchDrawingHandler) researchDrawingUnitPrice(ctx context.Context) float64 {
+func (h *ResearchDrawingHandler) researchDrawingUnitPrice(ctx context.Context, imageModelName string) float64 {
+	if strings.TrimSpace(imageModelName) == researchDrawingGPTImage2ModelName {
+		return researchDrawingGPTImage2UnitPrice
+	}
 	if h.settingService == nil {
 		return researchDrawingUnitPrice
 	}
@@ -870,7 +987,7 @@ func buildResearchDrawingDirectImagePrompt(req ResearchDrawingGenerateRequest) s
 }
 
 func researchDrawingDirectImageSize(_ string) string {
-	return "1536x1024"
+	return researchDrawingGPTImage2DirectSize
 }
 
 func researchDrawingResponsePreview(body []byte) string {

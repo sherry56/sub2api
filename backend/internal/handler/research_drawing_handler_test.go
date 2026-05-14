@@ -95,6 +95,21 @@ func (r *researchDrawingImage2RecordRepoStub) GetResearchDrawingImage2Record(ctx
 	return nil, nil
 }
 
+type researchDrawingRefundUserRepoStub struct {
+	service.UserRepository
+	updates []researchDrawingBalanceUpdate
+}
+
+type researchDrawingBalanceUpdate struct {
+	userID int64
+	amount float64
+}
+
+func (r *researchDrawingRefundUserRepoStub) UpdateBalance(ctx context.Context, userID int64, amount float64) error {
+	r.updates = append(r.updates, researchDrawingBalanceUpdate{userID: userID, amount: amount})
+	return nil
+}
+
 func TestResearchDrawingGPTImage2UsesDirectModeConfigFromEnv(t *testing.T) {
 	t.Setenv("GPT_API_KEY", "sk-gpt-fallback")
 	t.Setenv("GPT_BASE_URL", "https://fallback.example/v1")
@@ -117,8 +132,8 @@ func TestResearchDrawingGPTImage2UsesDirectModeConfigFromEnv(t *testing.T) {
 		t.Fatal("gpt-image-2 must use direct GPT mode instead of PaperBanana")
 	}
 	req.forceDirectGPTMode()
-	if req.NumCandidates != 1 || req.MaxCriticRounds != 0 || req.RetrievalSetting != "none" {
-		t.Fatalf("direct image mode did not collapse PaperBanana parameters: candidates=%d rounds=%d retrieval=%q", req.NumCandidates, req.MaxCriticRounds, req.RetrievalSetting)
+	if req.NumCandidates != 1 || req.MaxCriticRounds != 0 || req.RetrievalSetting != "none" || req.MaxRefineResolution != "1K" {
+		t.Fatalf("direct image mode did not collapse PaperBanana parameters: candidates=%d rounds=%d retrieval=%q resolution=%q", req.NumCandidates, req.MaxCriticRounds, req.RetrievalSetting, req.MaxRefineResolution)
 	}
 
 	cfg, err := handler.researchDrawingDirectGPTConfig(context.Background(), req)
@@ -222,8 +237,8 @@ func TestResearchDrawingGPTImage2IgnoresGPT55MainModel(t *testing.T) {
 			if payload["model"] != researchDrawingGPTImage2ModelName {
 				t.Errorf("image model = %v, want %s", payload["model"], researchDrawingGPTImage2ModelName)
 			}
-			if _, ok := payload["size"]; !ok {
-				t.Error("image request payload missing size")
+			if payload["size"] != researchDrawingGPTImage2DirectSize {
+				t.Errorf("image request size = %v, want %s", payload["size"], researchDrawingGPTImage2DirectSize)
 			}
 			prompt, _ := payload["prompt"].(string)
 			if !strings.Contains(prompt, "raw method content") || !strings.Contains(prompt, "raw caption") {
@@ -258,8 +273,8 @@ func TestResearchDrawingGPTImage2IgnoresGPT55MainModel(t *testing.T) {
 		t.Fatal("gpt-image-2 must use direct GPT mode")
 	}
 	req.forceDirectGPTMode()
-	if req.NumCandidates != 1 || req.MaxCriticRounds != 0 || req.RetrievalSetting != "none" {
-		t.Fatalf("direct image mode did not collapse PaperBanana parameters: candidates=%d rounds=%d retrieval=%q", req.NumCandidates, req.MaxCriticRounds, req.RetrievalSetting)
+	if req.NumCandidates != 1 || req.MaxCriticRounds != 0 || req.RetrievalSetting != "none" || req.MaxRefineResolution != "1K" {
+		t.Fatalf("direct image mode did not collapse PaperBanana parameters: candidates=%d rounds=%d retrieval=%q resolution=%q", req.NumCandidates, req.MaxCriticRounds, req.RetrievalSetting, req.MaxRefineResolution)
 	}
 
 	jobID := "job-test-gpt-image-2"
@@ -296,13 +311,159 @@ func TestResearchDrawingGPTImage2IgnoresGPT55MainModel(t *testing.T) {
 	}
 }
 
-func TestResearchDrawingGeminiImageModelKeepsPaperBananaPath(t *testing.T) {
+func TestResearchDrawingGPTImage2RetriesRetryableImageGenerationOnce(t *testing.T) {
+	t.Setenv("RESEARCH_DRAWING_DIRECT_RESULTS_DIR", t.TempDir())
+
+	imageRequests := 0
+	const pngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mNggAAAAAMAASsJTYQAAAAASUVORK5CYII="
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/images/generations" {
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		imageRequests++
+		if imageRequests == 1 {
+			http.Error(w, "temporary upstream failure", http.StatusServiceUnavailable)
+			return
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode image request payload: %v", err)
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if len(payload) != 3 {
+			t.Errorf("image request payload keys = %v, want only model/prompt/size", payload)
+		}
+		if payload["size"] != researchDrawingGPTImage2DirectSize {
+			t.Errorf("image request size = %v, want %s", payload["size"], researchDrawingGPTImage2DirectSize)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{{"b64_json": pngB64}},
+		})
+	}))
+	defer server.Close()
+
+	handler := NewResearchDrawingHandler(nil, nil, nil)
+	handler.httpClient = server.Client()
 	req := ResearchDrawingGenerateRequest{
 		MethodContent:     "method",
-		ImageGenModelName: researchDrawingDefaultImageModelName,
+		ImageGenModelName: researchDrawingGPTImage2ModelName,
+	}
+	req.normalize()
+
+	jobID := "job-test-gpt-image-2-retry"
+	handler.jobs[jobID] = researchDrawingJobCharge{
+		UserID:    1,
+		Direct:    true,
+		Status:    "running",
+		StartedAt: time.Now(),
+		Images:    make(map[int]researchDrawingDirectImage),
+	}
+	handler.runDirectGPTResearchDrawingJob(jobID, req, researchDrawingDirectGPTConfig{
+		ImageAPIKey:  "sk-image",
+		ImageBaseURL: server.URL,
+	})
+
+	if imageRequests != 2 {
+		t.Fatalf("image generation requests = %d, want 2", imageRequests)
+	}
+	job := handler.jobs[jobID]
+	if job.Status != "done" {
+		t.Fatalf("job status = %q, error = %q, want done", job.Status, job.Error)
+	}
+	if _, ok := job.Images[0]; !ok {
+		t.Fatal("candidate_0 image was not saved after retry success")
+	}
+}
+
+func TestResearchDrawingGPTImage2RetriesOnceThenRefundsAndDoesNotSaveEmptyImage(t *testing.T) {
+	t.Setenv("RESEARCH_DRAWING_DIRECT_RESULTS_DIR", t.TempDir())
+
+	imageRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/images/generations" {
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		imageRequests++
+		http.Error(w, "temporary upstream failure", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	userRepo := &researchDrawingRefundUserRepoStub{}
+	userSvc := service.NewUserService(userRepo, nil, nil, nil)
+	handler := NewResearchDrawingHandler(userSvc, nil, nil)
+	handler.httpClient = server.Client()
+	req := ResearchDrawingGenerateRequest{
+		MethodContent:     "method",
+		ImageGenModelName: researchDrawingGPTImage2ModelName,
+	}
+	req.normalize()
+
+	jobID := "job-test-gpt-image-2-refund"
+	handler.jobs[jobID] = researchDrawingJobCharge{
+		UserID:    7,
+		Charge:    researchDrawingGPTImage2UnitPrice,
+		Direct:    true,
+		Status:    "running",
+		StartedAt: time.Now(),
+		Images:    make(map[int]researchDrawingDirectImage),
+	}
+	handler.runDirectGPTResearchDrawingJob(jobID, req, researchDrawingDirectGPTConfig{
+		ImageAPIKey:  "sk-image",
+		ImageBaseURL: server.URL,
+	})
+
+	if imageRequests != 2 {
+		t.Fatalf("image generation requests = %d, want 2", imageRequests)
+	}
+	job := handler.jobs[jobID]
+	if job.Status != "error" {
+		t.Fatalf("job status = %q, want error", job.Status)
+	}
+	if !job.Refunded {
+		t.Fatal("failed direct GPT job was not marked refunded")
+	}
+	if len(userRepo.updates) != 1 {
+		t.Fatalf("balance updates = %d, want 1", len(userRepo.updates))
+	}
+	if userRepo.updates[0].userID != 7 || userRepo.updates[0].amount != researchDrawingGPTImage2UnitPrice {
+		t.Fatalf("unexpected refund update: %+v", userRepo.updates[0])
+	}
+	if len(job.Images) != 0 {
+		t.Fatalf("saved direct images = %d, want 0", len(job.Images))
+	}
+	if _, err := loadResearchDrawingDirectCandidate(jobID); err == nil {
+		t.Fatal("failed direct GPT job saved an image file")
+	}
+}
+
+func TestResearchDrawingGPTImage2DirectHTTPClientUses300SecondTimeout(t *testing.T) {
+	base := &http.Client{Timeout: time.Second}
+	got := researchDrawingHTTPClientWithTimeout(base, researchDrawingGPTImage2Timeout)
+	if got.Timeout != 300*time.Second {
+		t.Fatalf("direct GPT client timeout = %s, want 300s", got.Timeout)
+	}
+	if base.Timeout != time.Second {
+		t.Fatalf("base client timeout was mutated to %s", base.Timeout)
+	}
+}
+
+func TestResearchDrawingGeminiImageModelKeepsPaperBananaPath(t *testing.T) {
+	req := ResearchDrawingGenerateRequest{
+		MethodContent:       "method",
+		ImageGenModelName:   researchDrawingDefaultImageModelName,
+		MaxRefineResolution: "1K",
 	}
 	req.normalize()
 	if req.isDirectGPTMode() {
 		t.Fatal("Gemini/OpenRouter image model must stay on the PaperBanana path")
+	}
+	if req.MaxRefineResolution != "2K" {
+		t.Fatalf("Gemini/OpenRouter max refine resolution = %q, want PaperBanana default 2K", req.MaxRefineResolution)
 	}
 }

@@ -186,8 +186,7 @@
                 <label class="field-wrap">
                   <span>{{ t('researchDrawing.labels.maxRefineResolution') }}</span>
                   <select v-model="form.research_drawing_max_refine_resolution" class="input">
-                    <option value="2K">2K</option>
-                    <option value="4K">4K</option>
+                    <option v-for="option in maxRefineResolutionOptions" :key="option" :value="option">{{ option }}</option>
                   </select>
                 </label>
               </div>
@@ -513,7 +512,9 @@
                 class="input"
                 type="number"
                 min="1"
-                max="20"
+                :max="isDirectGPTMode ? 1 : 20"
+                :readonly="isDirectGPTMode"
+                :disabled="isDirectGPTMode"
               />
             </label>
 
@@ -523,16 +524,17 @@
                 v-model.number="form.research_drawing_max_critic_rounds"
                 class="input"
                 type="number"
-                min="1"
+                :min="isDirectGPTMode ? 0 : 1"
                 max="5"
+                :readonly="isDirectGPTMode"
+                :disabled="isDirectGPTMode"
               />
             </label>
 
             <label class="field-wrap">
               <span>{{ t('researchDrawing.labels.maxRefineResolution') }}</span>
-              <select v-model="form.research_drawing_max_refine_resolution" class="input">
-                <option value="2K">2K</option>
-                <option value="4K">4K</option>
+              <select v-model="form.research_drawing_max_refine_resolution" class="input" :disabled="isDirectGPTMode">
+                <option v-for="option in maxRefineResolutionOptions" :key="option" :value="option">{{ option }}</option>
               </select>
             </label>
           </div>
@@ -628,6 +630,8 @@ const DEFAULT_EXAMPLE_CAPTION =
 
 const GEMINI_IMAGE_MODEL = 'openrouter/google/gemini-3.1-flash-image-preview'
 const GPT_IMAGE_2_MODEL = 'gpt-image-2'
+const GPT_IMAGE_2_RESOLUTION = '1K'
+const PAPERBANANA_DEFAULT_RESOLUTION = '2K'
 const RUN_HISTORY_STORAGE_KEY = 'research_drawing_history'
 const RUN_HISTORY_LIMIT = 20
 const MODEL_UNIT_PRICES: Record<string, number> = {
@@ -641,7 +645,7 @@ const baseImageModelOptions = [
     value: GEMINI_IMAGE_MODEL,
   },
   {
-    label: 'GPT Image 2',
+    label: 'GPT Image 2 ($0.99 fast)',
     value: GPT_IMAGE_2_MODEL,
   },
 ]
@@ -655,7 +659,7 @@ const RESEARCH_DRAWING_DEFAULTS: ResearchDrawingForm = {
   research_drawing_aspect_ratio: '16:9',
   research_drawing_max_critic_rounds: 2,
   research_drawing_image_gen_model_name: GEMINI_IMAGE_MODEL,
-  research_drawing_max_refine_resolution: '2K',
+  research_drawing_max_refine_resolution: PAPERBANANA_DEFAULT_RESOLUTION,
   research_drawing_unit_price: 2.99,
 }
 
@@ -708,6 +712,7 @@ const canUseCustomGenerationMode = computed(() => form.research_drawing_image_ge
 const isCustomGenerationMode = computed(() => generationInput.generationMode === 'custom' && canUseCustomGenerationMode.value)
 const showPaperBananaParameters = computed(() => canUseCustomGenerationMode.value && isCustomGenerationMode.value)
 const selectedUnitPrice = computed(() => MODEL_UNIT_PRICES[form.research_drawing_image_gen_model_name] ?? MODEL_UNIT_PRICES[GEMINI_IMAGE_MODEL])
+const maxRefineResolutionOptions = computed(() => (isDirectGPTMode.value ? [GPT_IMAGE_2_RESOLUTION] : ['2K', '4K']))
 
 function displayModelName(model: string) {
   return baseImageModelOptions.find((option) => option.value === model)?.label || model || '-'
@@ -813,6 +818,14 @@ function stopExampleCarousel() {
   }
 }
 
+function applyDirectGPTFormConstraints() {
+  generationInput.generationMode = 'default'
+  form.research_drawing_num_candidates = 1
+  form.research_drawing_max_critic_rounds = 0
+  form.research_drawing_retrieval_setting = 'none'
+  form.research_drawing_max_refine_resolution = GPT_IMAGE_2_RESOLUTION
+}
+
 function loadMethodExample() {
   if (generationInput.methodExample === 'paperVizAgent') {
     generationInput.methodContent = DEFAULT_EXAMPLE_METHOD
@@ -838,8 +851,20 @@ function normalizeFormValues() {
     form.research_drawing_aspect_ratio = RESEARCH_DRAWING_DEFAULTS.research_drawing_aspect_ratio
   }
 
+  form.research_drawing_image_gen_model_name =
+    form.research_drawing_image_gen_model_name?.trim() || RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
+  if (!allowedImageModelValues.has(form.research_drawing_image_gen_model_name)) {
+    form.research_drawing_image_gen_model_name = RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
+  }
+
+  if (isDirectGPTMode.value) {
+    applyDirectGPTFormConstraints()
+    form.research_drawing_unit_price = selectedUnitPrice.value
+    return
+  }
+
   if (!['2K', '4K'].includes(form.research_drawing_max_refine_resolution)) {
-    form.research_drawing_max_refine_resolution = RESEARCH_DRAWING_DEFAULTS.research_drawing_max_refine_resolution
+    form.research_drawing_max_refine_resolution = PAPERBANANA_DEFAULT_RESOLUTION
   }
 
   form.research_drawing_num_candidates = Math.min(
@@ -852,11 +877,6 @@ function normalizeFormValues() {
     Math.max(1, Number(form.research_drawing_max_critic_rounds) || RESEARCH_DRAWING_DEFAULTS.research_drawing_max_critic_rounds),
   )
 
-  form.research_drawing_image_gen_model_name =
-    form.research_drawing_image_gen_model_name?.trim() || RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
-  if (!allowedImageModelValues.has(form.research_drawing_image_gen_model_name)) {
-    form.research_drawing_image_gen_model_name = RESEARCH_DRAWING_DEFAULTS.research_drawing_image_gen_model_name
-  }
   if (!canUseCustomGenerationMode.value) {
     generationInput.generationMode = 'default'
   }
@@ -897,8 +917,18 @@ function resetGenerationInput() {
 watch(
   () => form.research_drawing_image_gen_model_name,
   () => {
-    if (!canUseCustomGenerationMode.value) {
-      generationInput.generationMode = 'default'
+    if (isDirectGPTMode.value) {
+      applyDirectGPTFormConstraints()
+    } else {
+      if (form.research_drawing_max_refine_resolution === GPT_IMAGE_2_RESOLUTION) {
+        form.research_drawing_max_refine_resolution = PAPERBANANA_DEFAULT_RESOLUTION
+      }
+      if (Number(form.research_drawing_max_critic_rounds) < 1) {
+        form.research_drawing_max_critic_rounds = RESEARCH_DRAWING_DEFAULTS.research_drawing_max_critic_rounds
+      }
+      if (Number(form.research_drawing_num_candidates) < 1) {
+        form.research_drawing_num_candidates = RESEARCH_DRAWING_DEFAULTS.research_drawing_num_candidates
+      }
     }
     form.research_drawing_unit_price = selectedUnitPrice.value
   },
@@ -1234,7 +1264,7 @@ async function downloadResultImage(image: RunResultImage) {
   }
   downloadingImageKey.value = key
   try {
-    // TODO(research-drawing): switch this to the real PaperBanana 2K export endpoint when it is exposed.
+    // TODO(research-drawing): switch this to the real PaperBanana export endpoint when it is exposed.
     const blob = await researchDrawingAPI.getJobImage(
       image.jobId,
       image.candidateId,

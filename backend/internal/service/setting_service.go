@@ -1087,6 +1087,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	settings.ResearchDrawingMaxRefineResolution = normalizeResearchDrawingMaxRefineResolution(
 		settings.ResearchDrawingMaxRefineResolution,
 	)
+	applyResearchDrawingImageModelConstraints(settings)
 	if settings.ResearchDrawingUnitPrice <= 0 {
 		settings.ResearchDrawingUnitPrice = researchDrawingDefaultUnitPrice
 	}
@@ -2381,6 +2382,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.ResearchDrawingMaxRefineResolution = normalizeResearchDrawingMaxRefineResolution(
 		settings[SettingKeyResearchDrawingMaxRefineResolution],
 	)
+	applyResearchDrawingImageModelConstraints(&result)
 	result.ResearchDrawingUnitPrice = parseFloatWithDefault(
 		settings[SettingKeyResearchDrawingUnitPrice],
 		researchDrawingDefaultUnitPrice,
@@ -2425,6 +2427,7 @@ const (
 	researchDrawingGPTImage2ModelName         = "gpt-image-2"
 	researchDrawingDefaultGPTImageBaseURL     = "https://api.openai.com/v1"
 	researchDrawingDefaultMaxRefineResolution = "2K"
+	researchDrawingGPTImage2MaxResolution     = "1K"
 	researchDrawingDefaultUnitPrice           = 2.99
 	researchDrawingNumCandidatesMin           = 1
 	researchDrawingNumCandidatesMax           = 20
@@ -2492,10 +2495,29 @@ func normalizeResearchDrawingAspectRatio(raw string) string {
 }
 
 func normalizeResearchDrawingMaxRefineResolution(raw string) string {
-	if strings.EqualFold(strings.TrimSpace(raw), "4K") {
-		return "4K"
+	normalized := strings.ToUpper(strings.TrimSpace(raw))
+	switch normalized {
+	case "1K", "2K", "4K":
+		return normalized
+	default:
+		return researchDrawingDefaultMaxRefineResolution
 	}
-	return researchDrawingDefaultMaxRefineResolution
+}
+
+func applyResearchDrawingImageModelConstraints(settings *SystemSettings) {
+	if settings == nil {
+		return
+	}
+	if strings.TrimSpace(settings.ResearchDrawingImageGenModelName) != researchDrawingGPTImage2ModelName {
+		if settings.ResearchDrawingMaxRefineResolution == researchDrawingGPTImage2MaxResolution {
+			settings.ResearchDrawingMaxRefineResolution = researchDrawingDefaultMaxRefineResolution
+		}
+		return
+	}
+	settings.ResearchDrawingNumCandidates = 1
+	settings.ResearchDrawingMaxCriticRounds = 0
+	settings.ResearchDrawingRetrievalSetting = "none"
+	settings.ResearchDrawingMaxRefineResolution = researchDrawingGPTImage2MaxResolution
 }
 
 func normalizeResearchDrawingModelName(raw, fallback string) string {
