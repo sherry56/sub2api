@@ -31,15 +31,15 @@ import (
 )
 
 const (
-	researchDrawingUnitPrice             = 2.99
-	researchDrawingNanoBanana2UnitPrice  = 2.99
-	researchDrawingGPTImage2UnitPrice    = 0.99
-	researchDrawingDefaultImageModelName = "openrouter/google/gemini-3.1-flash-image-preview"
-	researchDrawingGPTImage2ModelName    = "gpt-image-2"
-	researchDrawingGPTImage2DirectSize   = "1024x1024"
-	researchDrawingGPTImage2MaxAttempts  = 2
-	researchDrawingGPTImage2Timeout      = 300 * time.Second
-	researchDrawingUpstreamBusyMessage   = "上游服务暂时繁忙，请稍后再试。生成失败不扣费。"
+	researchDrawingUnitPrice              = 2.99
+	researchDrawingNanoBanana2UnitPrice   = 2.99
+	researchDrawingGPTImage2UnitPrice     = 0.99
+	researchDrawingDefaultImageModelName  = "openrouter/google/gemini-3.1-flash-image-preview"
+	researchDrawingGPTImage2ModelName     = "gpt-image-2"
+	researchDrawingGPTImage2DirectSize    = "1024x1024"
+	researchDrawingGPTImage2MaxAttempts   = 2
+	researchDrawingGPTImage2Timeout       = 300 * time.Second
+	researchDrawingUpstreamBusyMessage    = "上游服务暂时繁忙，请稍后再试。生成失败不扣费。"
 	researchDrawingUpstreamTimeoutMessage = "上游生成超时，请稍后再试。生成失败不扣费。"
 )
 
@@ -56,23 +56,23 @@ type ResearchDrawingHandler struct {
 }
 
 type researchDrawingJobCharge struct {
-	UserID          int64
-	Charge          float64
-	ResolvedPrice   float64
+	UserID             int64
+	Charge             float64
+	ResolvedPrice      float64
 	ActualChargeAmount float64
 	ActualRefundAmount float64
-	Charged         bool
-	Charging        bool
-	Refunded        bool
-	PaperBananaUser string
-	ImageGenModelName string
-	Direct            bool
-	Status            string
-	Error             string
-	StartedAt         time.Time
-	FinishedAt        time.Time
-	ImagePrompt       string
-	Images            map[int]researchDrawingDirectImage
+	Charged            bool
+	Charging           bool
+	Refunded           bool
+	PaperBananaUser    string
+	ImageGenModelName  string
+	Direct             bool
+	Status             string
+	Error              string
+	StartedAt          time.Time
+	FinishedAt         time.Time
+	ImagePrompt        string
+	Images             map[int]researchDrawingDirectImage
 }
 
 type researchDrawingDirectImage struct {
@@ -1272,24 +1272,38 @@ func researchDrawingErrorLooksLike502(raw string) bool {
 	lower := strings.ToLower(raw)
 	compact := strings.ReplaceAll(lower, " ", "")
 	if lower == "502" ||
+		lower == "503" ||
 		strings.Contains(compact, "status_code=502") ||
+		strings.Contains(compact, "status_code=503") ||
 		strings.Contains(compact, "status_code:502") ||
-		strings.Contains(compact, "status_code\":502") {
+		strings.Contains(compact, "status_code:503") ||
+		strings.Contains(compact, "status_code\":502") ||
+		strings.Contains(compact, "status_code\":503") {
 		return true
 	}
 	for _, pattern := range []string{
 		"status_code=502",
+		"status_code=503",
 		"error code: 502",
+		"error code: 503",
 		"upstream request failed",
 		"upstream_error",
 		"returned 502",
+		"returned 503",
 		"status code: 502",
+		"status code: 503",
 		"status code 502",
+		"status code 503",
 		"status 502",
+		"status 503",
 		"code 502",
+		"code 503",
 		"http 502",
+		"http 503",
 		" 502",
+		" 503",
 		"502 ",
+		"503 ",
 	} {
 		if strings.Contains(lower, pattern) {
 			return true
