@@ -197,13 +197,13 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 		go h.runDirectGPTResearchDrawingJob(jobID, req, directCfg)
 
 		response.Accepted(c, researchDrawingGenerateResponse{
-			JobID:     jobID,
-			Status:    "running",
-			Mode:      "direct_gpt",
-			Charge:    resolvedPrice,
-			UnitPrice: resolvedPrice,
+			JobID:          jobID,
+			Status:         "running",
+			Mode:           "direct_gpt",
+			Charge:         resolvedPrice,
+			UnitPrice:      resolvedPrice,
 			EstimatedPrice: resolvedPrice,
-			QuotaNeed: req.directQuotaNeed(),
+			QuotaNeed:      req.directQuotaNeed(),
 		})
 		return
 	}
