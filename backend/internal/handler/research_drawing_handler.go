@@ -447,16 +447,16 @@ func (h *ResearchDrawingHandler) recordPrechargedJob(jobID string, userID int64,
 		return true, existingPrice
 	}
 	h.jobs[jobID] = researchDrawingJobCharge{
-		UserID:            userID,
-		Charge:            resolvedPrice,
-		ResolvedPrice:     resolvedPrice,
+		UserID:             userID,
+		Charge:             resolvedPrice,
+		ResolvedPrice:      resolvedPrice,
 		ActualChargeAmount: resolvedPrice,
-		Charged:           true,
-		PaperBananaUser:   pbUser,
-		ImageGenModelName: imageModelName,
-		Direct:            direct,
-		Status:            "running",
-		StartedAt:         time.Now(),
+		Charged:            true,
+		PaperBananaUser:    pbUser,
+		ImageGenModelName:  imageModelName,
+		Direct:             direct,
+		Status:             "running",
+		StartedAt:          time.Now(),
 	}
 	return false, resolvedPrice
 }
