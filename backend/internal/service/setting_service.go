@@ -2382,7 +2382,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.ResearchDrawingMaxRefineResolution = normalizeResearchDrawingMaxRefineResolution(
 		settings[SettingKeyResearchDrawingMaxRefineResolution],
 	)
-	applyResearchDrawingImageModelConstraints(&result)
+	applyResearchDrawingImageModelConstraints(result)
 	result.ResearchDrawingUnitPrice = parseFloatWithDefault(
 		settings[SettingKeyResearchDrawingUnitPrice],
 		researchDrawingDefaultUnitPrice,
