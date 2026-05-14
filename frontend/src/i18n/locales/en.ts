@@ -5902,6 +5902,8 @@ export default {
       downloadFailed: 'Failed to download candidate image',
       doneNotice: 'Research drawing task completed.',
       statusTitle: 'Wait Page Status',
+      upstreamBusyFriendly: '上游服务暂时繁忙，请稍后再试。生成失败不扣费。',
+      upstreamTimeoutFriendly: '上游生成超时，请稍后再试。生成失败不扣费。',
       resultsTitle: 'Generated Images',
       saveHint: 'Candidate images are temporary results. Download the generated image soon to save it locally.',
       emptyResults: 'Enter content and click generate to view progress and candidate images.',

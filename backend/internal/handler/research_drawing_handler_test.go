@@ -406,12 +406,15 @@ func TestResearchDrawingGPTImage2RetriesOnceThenRefundsAndDoesNotSaveEmptyImage(
 
 	jobID := "job-test-gpt-image-2-refund"
 	handler.jobs[jobID] = researchDrawingJobCharge{
-		UserID:    7,
-		Charge:    researchDrawingGPTImage2UnitPrice,
-		Direct:    true,
-		Status:    "running",
-		StartedAt: time.Now(),
-		Images:    make(map[int]researchDrawingDirectImage),
+		UserID:            7,
+		Charge:            researchDrawingGPTImage2UnitPrice,
+		ResolvedPrice:     researchDrawingGPTImage2UnitPrice,
+		Charged:           true,
+		ImageGenModelName: researchDrawingGPTImage2ModelName,
+		Direct:            true,
+		Status:            "running",
+		StartedAt:         time.Now(),
+		Images:            make(map[int]researchDrawingDirectImage),
 	}
 	handler.runDirectGPTResearchDrawingJob(jobID, req, researchDrawingDirectGPTConfig{
 		ImageAPIKey:  "sk-image",
@@ -428,6 +431,9 @@ func TestResearchDrawingGPTImage2RetriesOnceThenRefundsAndDoesNotSaveEmptyImage(
 	if !job.Refunded {
 		t.Fatal("failed direct GPT job was not marked refunded")
 	}
+	if job.Error != researchDrawingUpstreamBusyMessage {
+		t.Fatalf("job error = %q, want friendly upstream busy message", job.Error)
+	}
 	if len(userRepo.updates) != 1 {
 		t.Fatalf("balance updates = %d, want 1", len(userRepo.updates))
 	}
@@ -442,6 +448,36 @@ func TestResearchDrawingGPTImage2RetriesOnceThenRefundsAndDoesNotSaveEmptyImage(
 	}
 }
 
+func TestResearchDrawingFriendlyUpstreamErrorMessage(t *testing.T) {
+	if got := researchDrawingFriendlyUpstreamErrorMessage("gpt-image-2 image request failed: status_code=502 response_preview=upstream_error"); got != researchDrawingUpstreamBusyMessage {
+		t.Fatalf("502 friendly message = %q", got)
+	}
+	if got := researchDrawingFriendlyUpstreamErrorMessage(`{"status_code":502,"error":"upstream_error"}`); got != researchDrawingUpstreamBusyMessage {
+		t.Fatalf("json 502 friendly message = %q", got)
+	}
+	if got := researchDrawingFriendlyUpstreamErrorMessage("error code: 524 from upstream"); got != researchDrawingUpstreamTimeoutMessage {
+		t.Fatalf("524 friendly message = %q", got)
+	}
+	if got := researchDrawingFriendlyUpstreamErrorMessage(`{"status_code":524,"error":"timeout"}`); got != researchDrawingUpstreamTimeoutMessage {
+		t.Fatalf("json 524 friendly message = %q", got)
+	}
+	raw := "validation failed"
+	if got := researchDrawingFriendlyUpstreamErrorMessage(raw); got != raw {
+		t.Fatalf("non-upstream message = %q, want %q", got, raw)
+	}
+}
+
+func TestApplyResearchDrawingFriendlyStatusError(t *testing.T) {
+	status := map[string]any{
+		"status": "error",
+		"error":  "Upstream request failed: upstream_error",
+	}
+	applyResearchDrawingFriendlyStatusError(status)
+	if got := status["error"]; got != researchDrawingUpstreamBusyMessage {
+		t.Fatalf("status error = %q, want friendly upstream busy message", got)
+	}
+}
+
 func TestResearchDrawingGPTImage2DirectHTTPClientUses300SecondTimeout(t *testing.T) {
 	base := &http.Client{Timeout: time.Second}
 	got := researchDrawingHTTPClientWithTimeout(base, researchDrawingGPTImage2Timeout)
@@ -450,6 +486,78 @@ func TestResearchDrawingGPTImage2DirectHTTPClientUses300SecondTimeout(t *testing
 	}
 	if base.Timeout != time.Second {
 		t.Fatalf("base client timeout was mutated to %s", base.Timeout)
+	}
+}
+
+func TestResearchDrawingResolvedPricesAreForcedByImageModel(t *testing.T) {
+	if got := resolveResearchDrawingPrice(researchDrawingGPTImage2ModelName); got != 0.99 {
+		t.Fatalf("gpt-image-2 resolved price = %.4f, want 0.99", got)
+	}
+	if got := resolveResearchDrawingPrice(researchDrawingDefaultImageModelName); got != 2.99 {
+		t.Fatalf("Nano Banana 2 resolved price = %.4f, want 2.99", got)
+	}
+	if got := resolveResearchDrawingPrice("unknown-model"); got != 2.99 {
+		t.Fatalf("fallback resolved price = %.4f, want 2.99", got)
+	}
+}
+
+func TestResearchDrawingChargeJobOnceUsesResolvedPriceAndSkipsDuplicate(t *testing.T) {
+	userRepo := &researchDrawingRefundUserRepoStub{}
+	userSvc := service.NewUserService(userRepo, nil, nil, nil)
+	handler := NewResearchDrawingHandler(userSvc, nil, nil)
+
+	jobID := "job-charge-once"
+	charged, err := handler.chargeJobOnceWithContext(context.Background(), 9, jobID, researchDrawingGPTImage2ModelName, researchDrawingGPTImage2UnitPrice)
+	if err != nil {
+		t.Fatalf("chargeJobOnceWithContext returned error: %v", err)
+	}
+	if !charged {
+		t.Fatal("first charge should be applied")
+	}
+	charged, err = handler.chargeJobOnceWithContext(context.Background(), 9, jobID, researchDrawingGPTImage2ModelName, researchDrawingGPTImage2UnitPrice)
+	if err != nil {
+		t.Fatalf("second chargeJobOnceWithContext returned error: %v", err)
+	}
+	if charged {
+		t.Fatal("second charge should be skipped")
+	}
+	if len(userRepo.updates) != 1 {
+		t.Fatalf("balance updates = %d, want 1", len(userRepo.updates))
+	}
+	if userRepo.updates[0].userID != 9 || userRepo.updates[0].amount != -researchDrawingGPTImage2UnitPrice {
+		t.Fatalf("unexpected charge update: %+v", userRepo.updates[0])
+	}
+	job := handler.jobs[jobID]
+	if !job.Charged || job.Charging || job.Charge != researchDrawingGPTImage2UnitPrice || job.ResolvedPrice != researchDrawingGPTImage2UnitPrice {
+		t.Fatalf("unexpected job billing state: %+v", job)
+	}
+}
+
+func TestResearchDrawingRefundJobOnceUsesResolvedPriceAndSkipsDuplicate(t *testing.T) {
+	userRepo := &researchDrawingRefundUserRepoStub{}
+	userSvc := service.NewUserService(userRepo, nil, nil, nil)
+	handler := NewResearchDrawingHandler(userSvc, nil, nil)
+
+	jobID := "job-refund-once"
+	handler.jobs[jobID] = researchDrawingJobCharge{
+		UserID:            11,
+		Charge:            2.99,
+		ResolvedPrice:     researchDrawingGPTImage2UnitPrice,
+		Charged:           true,
+		ImageGenModelName: researchDrawingGPTImage2ModelName,
+		Status:            "error",
+	}
+	handler.refundJobOnceWithContext(context.Background(), 11, jobID)
+	handler.refundJobOnceWithContext(context.Background(), 11, jobID)
+
+	if len(userRepo.updates) != 1 {
+		t.Fatalf("balance updates = %d, want 1", len(userRepo.updates))
+	}
+	if userRepo.updates[0].userID != 11 || userRepo.updates[0].amount != researchDrawingGPTImage2UnitPrice {
+		t.Fatalf("unexpected refund update: %+v", userRepo.updates[0])
+	}
+	if !handler.jobs[jobID].Refunded {
+		t.Fatal("job was not marked refunded")
 	}
 }
 

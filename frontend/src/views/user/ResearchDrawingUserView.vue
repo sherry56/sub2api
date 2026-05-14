@@ -729,6 +729,76 @@ const quotaNeed = computed(() => {
 
 const unitPriceText = computed(() => selectedUnitPrice.value.toFixed(2))
 
+function researchDrawingErrorLooksLike502(message: string) {
+  const lower = message.toLowerCase()
+  const compact = lower.replace(/\s+/g, '')
+  if (
+    lower === '502' ||
+    compact.includes('status_code=502') ||
+    compact.includes('status_code:502') ||
+    compact.includes('status_code":502')
+  ) {
+    return true
+  }
+  return [
+    'status_code=502',
+    'error code: 502',
+    'upstream request failed',
+    'upstream_error',
+    'returned 502',
+    'status code: 502',
+    'status code 502',
+    'status 502',
+    'code 502',
+    'http 502',
+    ' 502',
+    '502 ',
+  ].some((pattern) => lower.includes(pattern))
+}
+
+function researchDrawingErrorLooksLike524(message: string) {
+  const lower = message.toLowerCase()
+  const compact = lower.replace(/\s+/g, '')
+  if (
+    lower === '524' ||
+    compact.includes('status_code=524') ||
+    compact.includes('status_code:524') ||
+    compact.includes('status_code":524')
+  ) {
+    return true
+  }
+  return [
+    'status_code=524',
+    'error code: 524',
+    'returned 524',
+    'status code: 524',
+    'status code 524',
+    'status 524',
+    'code 524',
+    'http 524',
+    ' 524',
+    '524 ',
+  ].some((pattern) => lower.includes(pattern))
+}
+
+function formatResearchDrawingErrorMessage(message?: string, fallback = t('researchDrawing.run.statuses.error')) {
+  const raw = String(message || '').trim()
+  if (!raw) {
+    return fallback
+  }
+  if (researchDrawingErrorLooksLike524(raw)) {
+    return t('researchDrawing.run.upstreamTimeoutFriendly')
+  }
+  if (researchDrawingErrorLooksLike502(raw)) {
+    return t('researchDrawing.run.upstreamBusyFriendly')
+  }
+  return raw
+}
+
+function formatResearchDrawingApiError(error: unknown, fallback: string) {
+  return formatResearchDrawingErrorMessage(extractApiErrorMessage(error, fallback), fallback)
+}
+
 const runStatusText = computed(() => {
   if (!runJobId.value) {
     return t('researchDrawing.run.runningBanner')
@@ -738,7 +808,7 @@ const runStatusText = computed(() => {
     return t('researchDrawing.run.statuses.done')
   }
   if (status === 'error') {
-    return runJobStatus.value?.error || t('researchDrawing.run.statuses.error')
+    return formatResearchDrawingErrorMessage(runJobStatus.value?.error, t('researchDrawing.run.statuses.error'))
   }
   const elapsed = runJobStatus.value?.elapsed_sec
   if (typeof elapsed === 'number') {
@@ -971,7 +1041,7 @@ async function startGenerationPreview() {
     startRunPolling()
   } catch (error) {
     runPreviewStarted.value = false
-    appStore.showError(extractApiErrorMessage(error, t('researchDrawing.run.submitFailed')))
+    appStore.showError(formatResearchDrawingApiError(error, t('researchDrawing.run.submitFailed')))
   } finally {
     runSubmitting.value = false
   }
@@ -1005,12 +1075,12 @@ async function pollRunStatus() {
         await loadRunImages(status)
         appStore.showSuccess(t('researchDrawing.run.doneNotice'))
       } else {
-        appStore.showError(status.error || t('researchDrawing.run.statuses.error'))
+        appStore.showError(formatResearchDrawingErrorMessage(status.error, t('researchDrawing.run.statuses.error')))
       }
     }
   } catch (error) {
     stopRunPolling()
-    appStore.showError(extractApiErrorMessage(error, t('researchDrawing.run.statusFailed')))
+    appStore.showError(formatResearchDrawingApiError(error, t('researchDrawing.run.statusFailed')))
   }
 }
 
@@ -1082,7 +1152,7 @@ async function loadRunImages(status: ResearchDrawingJobStatus) {
     runResultImages.value = images
     appendRunHistory(images)
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('researchDrawing.run.imagesFailed')))
+    appStore.showError(formatResearchDrawingApiError(error, t('researchDrawing.run.imagesFailed')))
   } finally {
     runImageLoading.value = false
   }
@@ -1279,7 +1349,7 @@ async function downloadResultImage(image: RunResultImage) {
     link.remove()
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('researchDrawing.run.downloadFailed')))
+    appStore.showError(formatResearchDrawingApiError(error, t('researchDrawing.run.downloadFailed')))
   } finally {
     downloadingImageKey.value = ''
   }
@@ -1303,7 +1373,7 @@ async function loadSettings() {
     const settings = await adminAPI.settings.getSettings()
     applySettings(settings)
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('researchDrawing.loadFailed')))
+    appStore.showError(formatResearchDrawingApiError(error, t('researchDrawing.loadFailed')))
   } finally {
     loading.value = false
   }
@@ -1333,7 +1403,7 @@ async function saveSettings() {
     applySettings(updated)
     appStore.showSuccess(t('common.saved'))
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('researchDrawing.saveFailed')))
+    appStore.showError(formatResearchDrawingApiError(error, t('researchDrawing.saveFailed')))
   } finally {
     saving.value = false
   }

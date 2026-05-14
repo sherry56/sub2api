@@ -32,12 +32,15 @@ import (
 
 const (
 	researchDrawingUnitPrice             = 2.99
+	researchDrawingNanoBanana2UnitPrice  = 2.99
 	researchDrawingGPTImage2UnitPrice    = 0.99
 	researchDrawingDefaultImageModelName = "openrouter/google/gemini-3.1-flash-image-preview"
 	researchDrawingGPTImage2ModelName    = "gpt-image-2"
 	researchDrawingGPTImage2DirectSize   = "1024x1024"
 	researchDrawingGPTImage2MaxAttempts  = 2
 	researchDrawingGPTImage2Timeout      = 300 * time.Second
+	researchDrawingUpstreamBusyMessage   = "上游服务暂时繁忙，请稍后再试。生成失败不扣费。"
+	researchDrawingUpstreamTimeoutMessage = "上游生成超时，请稍后再试。生成失败不扣费。"
 )
 
 type ResearchDrawingHandler struct {
@@ -55,15 +58,19 @@ type ResearchDrawingHandler struct {
 type researchDrawingJobCharge struct {
 	UserID          int64
 	Charge          float64
+	ResolvedPrice   float64
+	Charged         bool
+	Charging        bool
 	Refunded        bool
 	PaperBananaUser string
-	Direct          bool
-	Status          string
-	Error           string
-	StartedAt       time.Time
-	FinishedAt      time.Time
-	ImagePrompt     string
-	Images          map[int]researchDrawingDirectImage
+	ImageGenModelName string
+	Direct            bool
+	Status            string
+	Error             string
+	StartedAt         time.Time
+	FinishedAt        time.Time
+	ImagePrompt       string
+	Images            map[int]researchDrawingDirectImage
 }
 
 type researchDrawingDirectImage struct {
@@ -154,14 +161,9 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 		}
 	}
 
-	charge := h.researchDrawingUnitPrice(c.Request.Context(), req.ImageGenModelName)
-	if user.Balance < charge {
+	resolvedPrice := resolveResearchDrawingPrice(req.ImageGenModelName)
+	if user.Balance < resolvedPrice {
 		response.ErrorFrom(c, infraerrors.New(http.StatusPaymentRequired, "INSUFFICIENT_BALANCE", "insufficient balance"))
-		return
-	}
-
-	if err := h.userService.UpdateBalance(c.Request.Context(), subject.UserID, -charge); err != nil {
-		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -169,15 +171,24 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 		jobID := newResearchDrawingJobID()
 		h.mu.Lock()
 		h.jobs[jobID] = researchDrawingJobCharge{
-			UserID:          subject.UserID,
-			Charge:          charge,
-			PaperBananaUser: paperBananaUsername(user),
-			Direct:          true,
-			Status:          "running",
-			StartedAt:       time.Now(),
-			Images:          make(map[int]researchDrawingDirectImage),
+			UserID:            subject.UserID,
+			Charge:            resolvedPrice,
+			ResolvedPrice:     resolvedPrice,
+			PaperBananaUser:   paperBananaUsername(user),
+			ImageGenModelName: req.ImageGenModelName,
+			Direct:            true,
+			Status:            "running",
+			StartedAt:         time.Now(),
+			Images:            make(map[int]researchDrawingDirectImage),
 		}
 		h.mu.Unlock()
+		if charged, err := h.chargeJobOnceWithContext(c.Request.Context(), subject.UserID, jobID, req.ImageGenModelName, resolvedPrice); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		} else if !charged {
+			response.ErrorFrom(c, infraerrors.New(http.StatusConflict, "RESEARCH_DRAWING_JOB_ALREADY_CHARGED", "research drawing job already charged"))
+			return
+		}
 
 		go h.runDirectGPTResearchDrawingJob(jobID, req, directCfg)
 
@@ -185,23 +196,28 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 			JobID:     jobID,
 			Status:    "running",
 			Mode:      "direct_gpt",
-			Charge:    charge,
+			Charge:    resolvedPrice,
 			QuotaNeed: req.directQuotaNeed(),
 		})
 		return
 	}
 
+	if err := h.userService.UpdateBalance(c.Request.Context(), subject.UserID, -resolvedPrice); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	pbResp, err := h.submitToPaperBanana(c, user, req)
 	if err != nil {
-		_ = h.userService.UpdateBalance(c.Request.Context(), subject.UserID, charge)
-		response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "PAPERBANANA_SUBMIT_FAILED", err.Error()))
+		h.refundUntrackedCharge(c.Request.Context(), subject.UserID, "", req.ImageGenModelName, resolvedPrice, "paperbanana_submit_failed")
+		response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "PAPERBANANA_SUBMIT_FAILED", h.researchDrawingUserFacingError("paperbanana_submit_failed", "", req.ImageGenModelName, err)))
 		return
 	}
 
 	jobID := strings.TrimSpace(stringFromMap(pbResp, "job_id"))
 	pbUser := strings.TrimSpace(stringFromMap(pbResp, "username"))
 	if jobID == "" {
-		_ = h.userService.UpdateBalance(c.Request.Context(), subject.UserID, charge)
+		h.refundUntrackedCharge(c.Request.Context(), subject.UserID, "", req.ImageGenModelName, resolvedPrice, "paperbanana_invalid_response")
 		response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "PAPERBANANA_INVALID_RESPONSE", "PaperBanana did not return a job_id"))
 		return
 	}
@@ -209,16 +225,20 @@ func (h *ResearchDrawingHandler) Generate(c *gin.Context) {
 		pbUser = paperBananaUsername(user)
 	}
 
-	h.mu.Lock()
-	h.jobs[jobID] = researchDrawingJobCharge{UserID: subject.UserID, Charge: charge, PaperBananaUser: pbUser}
-	h.mu.Unlock()
+	if duplicate, existingCharge := h.recordPrechargedJob(jobID, subject.UserID, req.ImageGenModelName, resolvedPrice, pbUser, false); duplicate {
+		h.refundUntrackedCharge(c.Request.Context(), subject.UserID, jobID, req.ImageGenModelName, resolvedPrice, "duplicate_charge_refunded")
+		resolvedPrice = existingCharge
+		h.logBillingEvent("charge_skipped", jobID, subject.UserID, req.ImageGenModelName, resolvedPrice, 0, 0, "running", nil)
+	} else {
+		h.logBillingEvent("charge", jobID, subject.UserID, req.ImageGenModelName, resolvedPrice, resolvedPrice, 0, "running", nil)
+	}
 
 	response.Accepted(c, researchDrawingGenerateResponse{
 		JobID:           jobID,
 		Status:          "running",
 		PaperBananaURL:  paperBananaBaseURL(),
 		PaperBananaUser: pbUser,
-		Charge:          charge,
+		Charge:          resolvedPrice,
 		QuotaNeed:       req.quotaNeed(),
 	})
 }
@@ -244,6 +264,10 @@ func (h *ResearchDrawingHandler) JobStatus(c *gin.Context) {
 		if strings.EqualFold(stringFromMap(status, "status"), "error") {
 			h.refundJobOnce(c, subject.UserID, jobID)
 		}
+		applyResearchDrawingFriendlyStatusError(status)
+		if researchDrawingStatusDone(status) || researchDrawingStatusFailed(status) {
+			h.logJobFinalStatus(subject.UserID, jobID, stringFromMap(status, "status"))
+		}
 		response.Success(c, status)
 		return
 	}
@@ -251,7 +275,7 @@ func (h *ResearchDrawingHandler) JobStatus(c *gin.Context) {
 	status, err := h.getPaperBananaStatus(c, subject.UserID, jobID, pbUser)
 	if err != nil {
 		h.refundJobOnce(c, subject.UserID, jobID)
-		response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "PAPERBANANA_STATUS_FAILED", err.Error()))
+		response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "PAPERBANANA_STATUS_FAILED", h.researchDrawingUserFacingError("paperbanana_status_failed", jobID, "", err)))
 		return
 	}
 
@@ -262,6 +286,10 @@ func (h *ResearchDrawingHandler) JobStatus(c *gin.Context) {
 		h.refundJobOnce(c, subject.UserID, jobID)
 		status["status"] = "error"
 		status["error"] = "research drawing finished without valid images"
+	}
+	applyResearchDrawingFriendlyStatusError(status)
+	if researchDrawingStatusDone(status) || researchDrawingStatusFailed(status) {
+		h.logJobFinalStatus(subject.UserID, jobID, stringFromMap(status, "status"))
 	}
 	response.Success(c, status)
 }
@@ -295,7 +323,7 @@ func (h *ResearchDrawingHandler) JobImage(c *gin.Context) {
 	body, contentType, err := h.getPaperBananaImage(c, subject.UserID, jobID, candidateID, pbUser)
 	if err != nil {
 		h.refundJobOnce(c, subject.UserID, jobID)
-		response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "PAPERBANANA_IMAGE_FAILED", err.Error()))
+		response.ErrorFrom(c, infraerrors.New(http.StatusBadGateway, "PAPERBANANA_IMAGE_FAILED", h.researchDrawingUserFacingError("paperbanana_image_failed", jobID, "", err)))
 		return
 	}
 	if !isValidResearchDrawingImage(body, contentType) {
@@ -334,6 +362,99 @@ func (h *ResearchDrawingHandler) Image2Records(c *gin.Context) {
 	response.Success(c, researchDrawingImage2RecordsResponse{Records: records})
 }
 
+func (h *ResearchDrawingHandler) chargeJobOnceWithContext(ctx context.Context, userID int64, jobID, imageModelName string, resolvedPrice float64) (bool, error) {
+	if h.userService == nil {
+		return false, infraerrors.New(http.StatusInternalServerError, "RESEARCH_DRAWING_BILLING_UNAVAILABLE", "research drawing billing is unavailable")
+	}
+	imageModelName = normalizeResearchDrawingImageModelNameForLog(imageModelName)
+	h.mu.Lock()
+	job, ok := h.jobs[jobID]
+	if !ok {
+		job = researchDrawingJobCharge{
+			UserID:            userID,
+			Status:            "running",
+			ImageGenModelName: imageModelName,
+			StartedAt:         time.Now(),
+		}
+	}
+	if job.UserID != userID {
+		h.mu.Unlock()
+		return false, infraerrors.New(http.StatusConflict, "RESEARCH_DRAWING_JOB_OWNER_MISMATCH", "research drawing job owner mismatch")
+	}
+	if job.Charged || job.Charging {
+		h.mu.Unlock()
+		h.logBillingEvent("charge_skipped", jobID, userID, imageModelName, resolvedPrice, 0, 0, job.Status, nil)
+		return false, nil
+	}
+	job.Charging = true
+	job.Charge = resolvedPrice
+	job.ResolvedPrice = resolvedPrice
+	job.ImageGenModelName = imageModelName
+	h.jobs[jobID] = job
+	h.mu.Unlock()
+
+	if err := h.userService.UpdateBalance(ctx, userID, -resolvedPrice); err != nil {
+		h.mu.Lock()
+		if latest, ok := h.jobs[jobID]; ok && latest.UserID == userID {
+			latest.Charging = false
+			h.jobs[jobID] = latest
+		}
+		h.mu.Unlock()
+		h.logBillingEvent("charge_failed", jobID, userID, imageModelName, resolvedPrice, resolvedPrice, 0, "charge_failed", err)
+		return false, err
+	}
+
+	h.mu.Lock()
+	job = h.jobs[jobID]
+	job.Charging = false
+	job.Charged = true
+	job.Charge = resolvedPrice
+	job.ResolvedPrice = resolvedPrice
+	job.ImageGenModelName = imageModelName
+	h.jobs[jobID] = job
+	finalStatus := job.Status
+	h.mu.Unlock()
+	h.logBillingEvent("charge", jobID, userID, imageModelName, resolvedPrice, resolvedPrice, 0, finalStatus, nil)
+	return true, nil
+}
+
+func (h *ResearchDrawingHandler) recordPrechargedJob(jobID string, userID int64, imageModelName string, resolvedPrice float64, pbUser string, direct bool) (bool, float64) {
+	imageModelName = normalizeResearchDrawingImageModelNameForLog(imageModelName)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if existing, ok := h.jobs[jobID]; ok && existing.Charged {
+		existingPrice := existing.ResolvedPrice
+		if existingPrice <= 0 {
+			existingPrice = existing.Charge
+		}
+		return true, existingPrice
+	}
+	h.jobs[jobID] = researchDrawingJobCharge{
+		UserID:            userID,
+		Charge:            resolvedPrice,
+		ResolvedPrice:     resolvedPrice,
+		Charged:           true,
+		PaperBananaUser:   pbUser,
+		ImageGenModelName: imageModelName,
+		Direct:            direct,
+		Status:            "running",
+		StartedAt:         time.Now(),
+	}
+	return false, resolvedPrice
+}
+
+func (h *ResearchDrawingHandler) refundUntrackedCharge(ctx context.Context, userID int64, jobID, imageModelName string, resolvedPrice float64, finalStatus string) {
+	if h.userService == nil {
+		return
+	}
+	err := h.userService.UpdateBalance(ctx, userID, resolvedPrice)
+	event := "refund"
+	if err != nil {
+		event = "refund_failed"
+	}
+	h.logBillingEvent(event, jobID, userID, imageModelName, resolvedPrice, 0, resolvedPrice, finalStatus, err)
+}
+
 func (h *ResearchDrawingHandler) refundJobOnce(c *gin.Context, userID int64, jobID string) {
 	if c == nil || c.Request == nil {
 		h.refundJobOnceWithContext(context.Background(), userID, jobID)
@@ -348,24 +469,28 @@ func (h *ResearchDrawingHandler) refundJobOnceWithContext(ctx context.Context, u
 	}
 	h.mu.Lock()
 	charge, ok := h.jobs[jobID]
-	if !ok || charge.UserID != userID || charge.Refunded {
+	if !ok || charge.UserID != userID || charge.Refunded || !charge.Charged {
 		h.mu.Unlock()
 		return
 	}
 	charge.Refunded = true
 	h.jobs[jobID] = charge
 	h.mu.Unlock()
-	if err := h.userService.UpdateBalance(ctx, userID, charge.Charge); err != nil {
+	refundAmount := charge.ResolvedPrice
+	if refundAmount <= 0 {
+		refundAmount = charge.Charge
+	}
+	if err := h.userService.UpdateBalance(ctx, userID, refundAmount); err != nil {
 		h.mu.Lock()
 		if latest, ok := h.jobs[jobID]; ok && latest.UserID == userID {
 			latest.Refunded = false
 			h.jobs[jobID] = latest
 		}
 		h.mu.Unlock()
-		log.Printf("[ResearchDrawing] refund failed job_id=%s user_id=%d charge=%.4f error=%s", jobID, userID, charge.Charge, err.Error())
+		h.logBillingEvent("refund_failed", jobID, userID, charge.ImageGenModelName, refundAmount, 0, refundAmount, charge.Status, err)
 		return
 	}
-	log.Printf("[ResearchDrawing] refunded failed generation job_id=%s user_id=%d charge=%.4f", jobID, userID, charge.Charge)
+	h.logBillingEvent("refund", jobID, userID, charge.ImageGenModelName, refundAmount, 0, refundAmount, charge.Status, nil)
 }
 
 func (h *ResearchDrawingHandler) submitToPaperBanana(c *gin.Context, user *service.User, req ResearchDrawingGenerateRequest) (map[string]any, error) {
@@ -516,10 +641,15 @@ func (h *ResearchDrawingHandler) runDirectGPTResearchDrawingJob(jobID string, re
 	}
 
 	userID := int64(0)
+	resolvedPrice := float64(0)
 	h.mu.Lock()
 	job, ok := h.jobs[jobID]
 	if ok && job.Direct {
 		userID = job.UserID
+		resolvedPrice = job.ResolvedPrice
+		if resolvedPrice <= 0 {
+			resolvedPrice = job.Charge
+		}
 		if job.Images == nil {
 			job.Images = make(map[int]researchDrawingDirectImage)
 		}
@@ -537,6 +667,7 @@ func (h *ResearchDrawingHandler) runDirectGPTResearchDrawingJob(jobID string, re
 	h.mu.Unlock()
 	if userID > 0 {
 		h.recordImage2Job(context.Background(), userID, jobID, researchDrawingGPTImage2ModelName)
+		h.logBillingEvent("final_status", jobID, userID, req.ImageGenModelName, resolvedPrice, 0, 0, "done", nil)
 	}
 	log.Printf("[ResearchDrawing] direct GPT candidate image saved job_id=%s candidate_id=0 bytes=%d path=%s", jobID, len(imageBytes), outPath)
 }
@@ -723,25 +854,36 @@ func researchDrawingHTTPClientWithTimeout(base *http.Client, timeout time.Durati
 }
 
 func (h *ResearchDrawingHandler) failDirectJob(jobID string, err error) {
-	message := "direct GPT generation failed"
+	technicalMessage := "direct GPT generation failed"
 	if err != nil {
-		message = err.Error()
+		technicalMessage = err.Error()
 	}
+	userMessage := researchDrawingFriendlyUpstreamErrorMessage(technicalMessage)
 	userID := int64(0)
+	resolvedPrice := float64(0)
+	imageModelName := researchDrawingGPTImage2ModelName
 	h.mu.Lock()
 	job, ok := h.jobs[jobID]
 	if ok && job.Direct {
 		userID = job.UserID
+		resolvedPrice = job.ResolvedPrice
+		if resolvedPrice <= 0 {
+			resolvedPrice = job.Charge
+		}
+		if strings.TrimSpace(job.ImageGenModelName) != "" {
+			imageModelName = job.ImageGenModelName
+		}
 		job.Status = "error"
-		job.Error = message
+		job.Error = userMessage
 		job.FinishedAt = time.Now()
 		h.jobs[jobID] = job
 	}
 	h.mu.Unlock()
 	if userID > 0 {
 		h.refundJobOnceWithContext(context.Background(), userID, jobID)
+		h.logBillingEvent("final_status", jobID, userID, imageModelName, resolvedPrice, 0, 0, "error", err)
 	}
-	log.Printf("[ResearchDrawing] direct GPT generation failed job_id=%s error=%s", jobID, message)
+	log.Printf("[ResearchDrawing] direct GPT generation failed job_id=%s image_gen_model_name=%s error=%s user_error=%s", jobID, imageModelName, technicalMessage, userMessage)
 }
 
 func (h *ResearchDrawingHandler) getDirectJobStatus(userID int64, jobID string) (map[string]any, bool, error) {
@@ -927,18 +1069,156 @@ func (r ResearchDrawingGenerateRequest) quotaNeed() int {
 	return candidates * (1 + rounds)
 }
 
-func (h *ResearchDrawingHandler) researchDrawingUnitPrice(ctx context.Context, imageModelName string) float64 {
-	if strings.TrimSpace(imageModelName) == researchDrawingGPTImage2ModelName {
+func resolveResearchDrawingPrice(imageModelName string) float64 {
+	switch strings.TrimSpace(imageModelName) {
+	case researchDrawingGPTImage2ModelName:
 		return researchDrawingGPTImage2UnitPrice
-	}
-	if h.settingService == nil {
+	case researchDrawingDefaultImageModelName:
+		return researchDrawingNanoBanana2UnitPrice
+	default:
 		return researchDrawingUnitPrice
 	}
-	settings, err := h.settingService.GetAllSettings(ctx)
-	if err != nil || settings == nil || settings.ResearchDrawingUnitPrice <= 0 {
-		return researchDrawingUnitPrice
+}
+
+func normalizeResearchDrawingImageModelNameForLog(imageModelName string) string {
+	trimmed := strings.TrimSpace(imageModelName)
+	if trimmed == "" {
+		return researchDrawingDefaultImageModelName
 	}
-	return settings.ResearchDrawingUnitPrice
+	return trimmed
+}
+
+func (h *ResearchDrawingHandler) logJobFinalStatus(userID int64, jobID, finalStatus string) {
+	h.mu.Lock()
+	job, ok := h.jobs[jobID]
+	h.mu.Unlock()
+	if !ok || job.UserID != userID {
+		return
+	}
+	resolvedPrice := job.ResolvedPrice
+	if resolvedPrice <= 0 {
+		resolvedPrice = job.Charge
+	}
+	h.logBillingEvent("final_status", jobID, userID, job.ImageGenModelName, resolvedPrice, 0, 0, finalStatus, nil)
+}
+
+func (h *ResearchDrawingHandler) logBillingEvent(event, jobID string, userID int64, imageModelName string, resolvedPrice, chargeAmount, refundAmount float64, finalStatus string, err error) {
+	errMessage := ""
+	if err != nil {
+		errMessage = err.Error()
+	}
+	log.Printf(
+		"[ResearchDrawing] billing event=%s job_id=%s user_id=%d image_gen_model_name=%s resolved_price=%.4f charge_amount=%.4f refund_amount=%.4f final_status=%s error=%s",
+		event,
+		jobID,
+		userID,
+		normalizeResearchDrawingImageModelNameForLog(imageModelName),
+		resolvedPrice,
+		chargeAmount,
+		refundAmount,
+		finalStatus,
+		errMessage,
+	)
+}
+
+func (h *ResearchDrawingHandler) researchDrawingUserFacingError(event, jobID, imageModelName string, err error) string {
+	if err == nil {
+		return ""
+	}
+	technicalMessage := err.Error()
+	userMessage := researchDrawingFriendlyUpstreamErrorMessage(technicalMessage)
+	if userMessage != technicalMessage {
+		log.Printf("[ResearchDrawing] upstream technical error event=%s job_id=%s image_gen_model_name=%s error=%s user_error=%s", event, jobID, normalizeResearchDrawingImageModelNameForLog(imageModelName), technicalMessage, userMessage)
+	}
+	return userMessage
+}
+
+func applyResearchDrawingFriendlyStatusError(status map[string]any) {
+	if status == nil {
+		return
+	}
+	for _, key := range []string{"error", "message", "detail"} {
+		raw := strings.TrimSpace(stringFromMap(status, key))
+		if raw == "" {
+			continue
+		}
+		if friendly := researchDrawingFriendlyUpstreamErrorMessage(raw); friendly != raw {
+			status["error"] = friendly
+			return
+		}
+	}
+}
+
+func researchDrawingFriendlyUpstreamErrorMessage(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return trimmed
+	}
+	if researchDrawingErrorLooksLike524(trimmed) {
+		return researchDrawingUpstreamTimeoutMessage
+	}
+	if researchDrawingErrorLooksLike502(trimmed) {
+		return researchDrawingUpstreamBusyMessage
+	}
+	return trimmed
+}
+
+func researchDrawingErrorLooksLike502(raw string) bool {
+	lower := strings.ToLower(raw)
+	compact := strings.ReplaceAll(lower, " ", "")
+	if lower == "502" ||
+		strings.Contains(compact, "status_code=502") ||
+		strings.Contains(compact, "status_code:502") ||
+		strings.Contains(compact, "status_code\":502") {
+		return true
+	}
+	for _, pattern := range []string{
+		"status_code=502",
+		"error code: 502",
+		"upstream request failed",
+		"upstream_error",
+		"returned 502",
+		"status code: 502",
+		"status code 502",
+		"status 502",
+		"code 502",
+		"http 502",
+		" 502",
+		"502 ",
+	} {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func researchDrawingErrorLooksLike524(raw string) bool {
+	lower := strings.ToLower(raw)
+	compact := strings.ReplaceAll(lower, " ", "")
+	if lower == "524" ||
+		strings.Contains(compact, "status_code=524") ||
+		strings.Contains(compact, "status_code:524") ||
+		strings.Contains(compact, "status_code\":524") {
+		return true
+	}
+	for _, pattern := range []string{
+		"status_code=524",
+		"error code: 524",
+		"returned 524",
+		"status code: 524",
+		"status code 524",
+		"status 524",
+		"code 524",
+		"http 524",
+		" 524",
+		"524 ",
+	} {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *ResearchDrawingHandler) researchDrawingDirectGPTConfig(_ context.Context, _ ResearchDrawingGenerateRequest) (researchDrawingDirectGPTConfig, error) {

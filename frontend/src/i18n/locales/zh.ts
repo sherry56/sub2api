@@ -6061,6 +6061,8 @@ export default {
       downloadFailed: '候选图下载失败',
       doneNotice: '科研绘图任务已完成。',
       statusTitle: '等待页状态',
+      upstreamBusyFriendly: '上游服务暂时繁忙，请稍后再试。生成失败不扣费。',
+      upstreamTimeoutFriendly: '上游生成超时，请稍后再试。生成失败不扣费。',
       resultsTitle: '生成图片',
       saveHint: '候选图为临时生成结果，请及时下载生成图片保存。',
       emptyResults: '填写内容后点击生成，即可查看运行进度与候选图。',
