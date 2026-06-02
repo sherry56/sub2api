@@ -12,16 +12,23 @@ ARG ALPINE_IMAGE=alpine:3.21
 ARG POSTGRES_IMAGE=postgres:18-alpine
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
+ARG PNPM_VERSION=10.33.2
+ARG PNPM_REGISTRY=https://registry.npmmirror.com
 
 # -----------------------------------------------------------------------------
 # Stage 1: Frontend Builder
 # -----------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS frontend-builder
 
+ARG PNPM_VERSION
+ARG PNPM_REGISTRY
+
 WORKDIR /app/frontend
 
 # Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && \
+    corepack prepare pnpm@${PNPM_VERSION} --activate && \
+    pnpm config set registry ${PNPM_REGISTRY}
 
 # Install dependencies first (better caching)
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
