@@ -3,9 +3,9 @@
 # =============================================================================
 # Server usage:
 #   1. Copy this file and .env to the server deploy directory.
-#   2. Set SUB2API_IMAGE and PAPERBANANA_IMAGE in .env.
-#   3. docker compose -f docker-compose.prod.yml pull
-#   4. docker compose -f docker-compose.prod.yml up -d
+#   2. Optionally set SUB2API_IMAGE and PAPERBANANA_IMAGE in .env.
+#   3. docker compose -f docker-compose.prod.yml pull sub2api
+#   4. docker compose -f docker-compose.prod.yml up -d --no-build sub2api
 #
 # This file intentionally does not use build:. Images are built by GitHub
 # Actions and pulled by the server.
@@ -13,7 +13,7 @@
 
 services:
   sub2api:
-    image: ${SUB2API_IMAGE:-ghcr.io/your-owner/sub2api:dev}
+    image: ${SUB2API_IMAGE:-ghcr.io/sherry56/sub2api:latest}
     pull_policy: always
     container_name: sub2api
     restart: unless-stopped
@@ -162,8 +162,8 @@ services:
       start_period: 30s
 
   paperbanana:
-    image: ${PAPERBANANA_IMAGE:-ghcr.io/your-owner/paperbanana:dev}
-    pull_policy: always
+    image: ${PAPERBANANA_IMAGE:-paperbanana-demo:latest}
+    pull_policy: ${PAPERBANANA_PULL_POLICY:-never}
     container_name: paperbanana
     restart: unless-stopped
     ports:

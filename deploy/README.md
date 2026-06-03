@@ -13,8 +13,9 @@ This directory contains files for deploying Sub2API on Linux servers.
 
 | File | Description |
 |------|-------------|
-| `docker-compose.yml` | Docker Compose configuration (named volumes) |
-| `docker-compose.local.yml` | Docker Compose configuration (local directories, easy migration) |
+| `docker-compose.yml` | Docker Compose configuration using the remote Sub2API image and named volumes |
+| `docker-compose.local.yml` | Docker Compose configuration that builds locally and uses local directories |
+| `docker-compose.prod.yml` | Production compose using remote images and local data directories |
 | `docker-compose.paperbanana.yml` | Optional overlay that adds PaperBanana + unified static menu |
 | `docker-deploy.sh` | **One-click Docker deployment script (recommended)** |
 | `.env.example` | Docker environment variables template |
@@ -73,7 +74,7 @@ If you prefer manual control:
 
 ```bash
 # Clone repository
-git clone https://github.com/Wei-Shaw/sub2api.git
+git clone https://github.com/sherry56/sub2api.git
 cd sub2api/deploy
 
 # Configure environment
@@ -86,14 +87,12 @@ TOTP_ENCRYPTION_KEY=$(openssl rand -hex 32)
 echo "JWT_SECRET=${JWT_SECRET}" >> .env
 echo "TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY}" >> .env
 
-# Create data directories
-mkdir -p data postgres_data redis_data
-
-# Start all services using local directory version
-docker compose -f docker-compose.local.yml up -d
+# Start all services using the remote production image
+docker compose -f docker-compose.yml pull sub2api
+docker compose -f docker-compose.yml up -d --no-build
 
 # View logs (check for auto-generated admin password)
-docker compose -f docker-compose.local.yml logs -f sub2api
+docker compose -f docker-compose.yml logs -f sub2api
 
 # Access Web UI
 # http://localhost:8080
@@ -105,7 +104,7 @@ If you want the deployment-side "科研绘图 + 统一入口" layout to live in 
 
 ```bash
 # Clone Sub2API and keep the PaperBanana source in the same workspace
-git clone https://github.com/Wei-Shaw/sub2api.git
+git clone https://github.com/sherry56/sub2api.git
 git clone <your-paperbanana-repo> PaperBanana-fix-issue-38-refine
 
 cd sub2api/deploy
@@ -116,8 +115,9 @@ cp .env.example .env
 mkdir -p data postgres_data redis_data
 mkdir -p paperbanana/user_data paperbanana/configs
 
-# Start base stack + overlay
-docker compose -f docker-compose.local.yml -f docker-compose.paperbanana.yml up -d --build
+# Start base stack + overlay without rebuilding Sub2API
+docker compose -f docker-compose.yml -f docker-compose.paperbanana.yml pull sub2api
+docker compose -f docker-compose.yml -f docker-compose.paperbanana.yml up -d --no-build
 
 # Access unified menu
 # http://localhost:8090
@@ -126,13 +126,15 @@ docker compose -f docker-compose.local.yml -f docker-compose.paperbanana.yml up 
 Windows PowerShell from the repository root:
 
 ```powershell
-docker compose -f deploy/docker-compose.local.yml -f deploy/docker-compose.paperbanana.yml up -d --build
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.paperbanana.yml pull sub2api
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.paperbanana.yml up -d --no-build
 ```
 
 Named-volume deployment variant:
 
 ```powershell
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.paperbanana.yml up -d --build
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.paperbanana.yml pull sub2api
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.paperbanana.yml up -d --no-build
 ```
 
 Stop the local stack without deleting MySQL data or generated results:
@@ -187,10 +189,11 @@ Notes:
 
 | Version | Data Storage | Migration | Best For |
 |---------|-------------|-----------|----------|
-| **docker-compose.local.yml** | Local directories (./data, ./postgres_data, ./redis_data) | ✅ Easy (tar entire directory) | Production, need frequent backups/migration |
-| **docker-compose.yml** | Named volumes (/var/lib/docker/volumes/) | ⚠️ Requires docker commands | Simple setup, don't need migration |
+| **docker-compose.yml** | Named volumes (/var/lib/docker/volumes/) | Requires Docker volume-aware backup | Remote image production default |
+| **docker-compose.prod.yml** | Local directories (./data, ./postgres_data, ./redis_data) | Easy to archive as a deploy folder | Remote image production with local data dirs |
+| **docker-compose.local.yml** | Local directories (./data, ./postgres_data, ./redis_data) | Easy to archive as a deploy folder | Local source builds only |
 
-**Recommendation:** Use `docker-compose.local.yml` (deployed by `docker-deploy.sh`) for easier data management and migration.
+**Recommendation:** Use `docker-compose.yml` for remote-image production, or `docker-compose.prod.yml` when you need local data directories. Use `docker-compose.local.yml` only when the server has enough memory to build images locally.
 
 ### How Auto-Setup Works
 
@@ -259,13 +262,9 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 # Restart Sub2API only
 docker compose -f docker-compose.local.yml restart sub2api
 
-# Update to latest version
-docker compose -f docker-compose.local.yml pull
-docker compose -f docker-compose.local.yml up -d
-
-# Remove all data (caution!)
-docker compose -f docker-compose.local.yml down
-rm -rf data/ postgres_data/ redis_data/
+# Update to latest local-build configuration without deleting data
+git pull --ff-only origin main
+docker compose -f docker-compose.local.yml up -d --build sub2api
 ```
 
 For **named volumes version** (docker-compose.yml):
@@ -283,12 +282,10 @@ docker compose logs -f sub2api
 # Restart Sub2API only
 docker compose restart sub2api
 
-# Update to latest version
-docker compose pull
-docker compose up -d
-
-# Remove all data (caution!)
-docker compose down -v
+# Update to latest remote image without deleting data
+git pull --ff-only origin main
+docker compose pull sub2api
+docker compose up -d --no-build sub2api
 ```
 
 ### Environment Variables

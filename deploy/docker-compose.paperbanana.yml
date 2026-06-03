@@ -9,6 +9,9 @@
 #   - Research Drawing service (PaperBanana runtime)
 #   - Unified static menu page
 #
+# It does not redefine the sub2api service. The base compose file controls the
+# Sub2API image; use SUB2API_IMAGE there if you need to override it.
+#
 # Requirements:
 #   1. A PaperBanana source checkout must exist locally.
 #   2. The default build context assumes a sibling checkout next to the
@@ -52,6 +55,7 @@ services:
     build:
       context: ${PAPERBANANA_BUILD_CONTEXT:-../../../PaperBanana-fix-issue-38-refine}
     image: ${PAPERBANANA_IMAGE:-paperbanana-demo:latest}
+    pull_policy: never
     container_name: paperbanana
     restart: unless-stopped
     ports:
