@@ -506,6 +506,7 @@ func DefaultBetaPolicySettings() *BetaPolicySettings {
 		},
 	}
 }
+
 // OpenAI Fast Policy 策略常量
 // OpenAI 的 "fast 模式" 通过请求体中的 service_tier 字段识别：
 //   - "priority"（客户端可传 "fast"，归一化为 "priority"）：fast 模式
